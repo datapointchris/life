@@ -10,7 +10,7 @@ sources.
 
 ## Initializing
 
-The state lives in the account's state bucket under `life/terraform.tfstate`. The bucket
+The state lives in the account's state bucket, under the `key` that `backend.tf` declares. The bucket
 name carries the account id, and so does the role the provider assumes. Neither is committed. Both
 come from the credentials in use:
 
@@ -28,9 +28,9 @@ Locking uses S3 lock files, which needs Terraform 1.10 or later.
 
 ### Terraform State is Locked
 
-Github Runners sometimes lock the state.
+A run that ends before it releases its lock leaves the state locked. CI initializes with
+`-backend=false`, so it never takes the lock.
 
-Locally:
 `terraform plan` -> This will give you an ID of the lock.
 `terraform force-unlock $LOCK_ID`
 
