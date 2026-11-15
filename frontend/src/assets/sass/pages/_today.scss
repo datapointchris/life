@@ -152,6 +152,11 @@
     text-decoration: line-through;
   }
 
+  // The checklist takes a line of its own under the habit's name.
+  &--with-checklist {
+    flex-wrap: wrap;
+  }
+
   &__tag {
     flex-shrink: 0;
     color: var(--clr-gray-400);

@@ -1,0 +1,55 @@
+@use '../abstracts/touch';
+
+// A habit's checklist: each item's name, then one box per time its day asks for.
+// The boxes are touch targets, because the page a phone opens on shows them.
+.habit-checklist {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  margin: 0;
+  padding: 0 0 var(--space-2xs);
+  list-style: none;
+
+  &__item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3xs) var(--space-2xs);
+  }
+
+  &__name {
+    flex: 1;
+    min-width: 7rem;
+    color: var(--clr-text);
+    font-size: var(--fs-300);
+  }
+
+  &__item--done &__name {
+    color: var(--clr-gray-500);
+  }
+
+  &__boxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3xs);
+  }
+
+  &__box {
+    width: touch.$touch-target;
+    height: touch.$touch-target;
+    border: 2px solid var(--clr-gray-500);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--clr-success);
+    cursor: pointer;
+
+    &--ticked {
+      border-color: var(--clr-success);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+    }
+  }
+}

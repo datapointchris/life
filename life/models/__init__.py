@@ -21,6 +21,8 @@ from life.models.duration_note import DurationNote
 from life.models.event import Event
 from life.models.habit import Habit
 from life.models.habitcategory import HabitCategory
+from life.models.habitchecklist import HabitChecklistItem
+from life.models.habitchecklist import HabitItemTick
 from life.models.habitcompleted import HabitCompleted
 from life.models.money_wasted import MoneyWasted
 from life.models.pattern import Pattern
@@ -71,7 +73,9 @@ __all__ = [
     'Event',
     'Habit',
     'HabitCategory',
+    'HabitChecklistItem',
     'HabitCompleted',
+    'HabitItemTick',
     'MoneyWasted',
     'Pattern',
     'CookingTechnique',

@@ -14,6 +14,7 @@ from life.api.endpoints.auth import DbSession
 from life.api.exceptions import NotFoundException
 from life.api.request_zone import RequestZone
 from life.api.time_window import TimeWindowQuery
+from life.services import habit_checklist
 from life.services import habit_day
 from life.services.row_limit import RowLimit
 from life.services.row_limit import apply_row_limit
@@ -133,7 +134,72 @@ def read_day(session: DbSession, zone: RequestZone, date: dt.date | None = None)
         due=due,
         completed=completed,
         current_total=len(current),
+        checklists=habit_checklist.checklists(session, current, day),
     )
+
+
+@router.get('/{id}/items', response_model=list[schemas.HabitChecklistItem], status_code=status.HTTP_200_OK)
+def read_items(id: int, session: DbSession, limit: RowLimit = None):
+    if session.get(models.Habit, id) is None:
+        raise NotFoundException('habit', id, logger)
+    query = select(models.HabitChecklistItem).where(models.HabitChecklistItem.habit_id == id).order_by(models.HabitChecklistItem.id)
+    return list(session.scalars(apply_row_limit(query, limit)).all())
+
+
+@router.post('/{id}/items', response_model=schemas.HabitChecklistItem, status_code=status.HTTP_201_CREATED)
+def create_item(id: int, item: schemas.HabitChecklistItemCreate, session: DbSession):
+    if session.get(models.Habit, id) is None:
+        raise NotFoundException('habit', id, logger)
+    db_obj = models.HabitChecklistItem(habit_id=id, **item.model_dump())
+    session.add(db_obj)
+    session.commit()
+    session.refresh(db_obj)
+    return db_obj
+
+
+@router.patch('/items/{item_id}', response_model=schemas.HabitChecklistItem, status_code=status.HTTP_200_OK)
+def update_item(item_id: int, update: schemas.HabitChecklistItemUpdate, session: DbSession):
+    if item := session.get(models.HabitChecklistItem, item_id):
+        for attr, value in update.model_dump(exclude_unset=True).items():
+            setattr(item, attr, value)
+        session.commit()
+        session.refresh(item)
+        return item
+    raise NotFoundException('checklist item', item_id, logger)
+
+
+@router.delete('/items/{item_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_item(item_id: int, session: DbSession):
+    if item := session.get(models.HabitChecklistItem, item_id):
+        session.delete(item)
+        session.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    raise NotFoundException('checklist item', item_id, logger)
+
+
+@router.post('/items/{item_id}/ticks', response_model=schemas.HabitChecklist, status_code=status.HTTP_201_CREATED)
+def create_tick(item_id: int, tick: schemas.HabitItemTickCreate, session: DbSession, zone: RequestZone):
+    """Record one time the item was done, and answer with its habit's checklist that day.
+
+    `tick_date` left off is today in the request's zone, the same day `/habits/day` names.
+    """
+    item = session.get(models.HabitChecklistItem, item_id)
+    if item is None:
+        raise NotFoundException('checklist item', item_id, logger)
+    day = tick.tick_date if tick.tick_date is not None else dt.datetime.now(ZoneInfo(zone)).date()
+    return habit_checklist.tick(session, item, day)
+
+
+@router.delete('/items/{item_id}/ticks/{tick_id}', response_model=schemas.HabitChecklist, status_code=status.HTTP_200_OK)
+def delete_tick(item_id: int, tick_id: int, session: DbSession):
+    """Remove one tick, and answer with its habit's checklist on the tick's day."""
+    item = session.get(models.HabitChecklistItem, item_id)
+    if item is None:
+        raise NotFoundException('checklist item', item_id, logger)
+    recorded = session.get(models.HabitItemTick, tick_id)
+    if recorded is None or recorded.item_id != item_id:
+        raise NotFoundException('tick', tick_id, logger)
+    return habit_checklist.untick(session, item, recorded)
 
 
 @router.get('/{id}', response_model=schemas.Habit, status_code=status.HTTP_200_OK)

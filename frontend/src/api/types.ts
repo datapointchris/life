@@ -488,6 +488,39 @@ export interface HabitsDay {
   due: Habit[]
   completed: HabitCompleted[]
   current_total: number
+  /** Every current habit with checklist items, in habit-id order. */
+  checklists: HabitChecklist[]
+}
+
+/** One time a checklist item was done. */
+export interface HabitItemTick {
+  id: number
+  item_id: number | null
+  habit_id: number | null
+  name: string
+  tick_date: string
+  ticked_at: string
+}
+
+/** One checklist item on one day: its ticks, oldest first, against its target. */
+export interface HabitChecklistItemDay {
+  id: number
+  name: string
+  daily_target: number
+  ticks: HabitItemTick[]
+  done: boolean
+}
+
+/**
+ * A habit's checklist on one day. `complete` says every item reached its
+ * target, and the tick that made it so recorded the habit's completion.
+ */
+export interface HabitChecklist {
+  habit_id: number
+  name: string
+  date: string
+  items: HabitChecklistItemDay[]
+  complete: boolean
 }
 
 export interface HabitCategoryCreate {

@@ -71,6 +71,7 @@ type HabitsDay struct {
 	Due          []Habit          `json:"due"`
 	Completed    []HabitCompleted `json:"completed"`
 	CurrentTotal int              `json:"current_total"`
+	Checklists   []HabitChecklist `json:"checklists"`
 }
 
 // GetHabitsDay returns one day's board (GET /habits/day). An empty day asks for

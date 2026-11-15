@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 
 from life.schemas.habit import Habit
+from life.schemas.habitchecklist import HabitChecklist
 from life.schemas.habitcompleted import HabitCompleted
 
 
@@ -21,3 +22,5 @@ class HabitsDay(BaseModel):
     due: list[Habit]
     completed: list[HabitCompleted]
     current_total: int
+    # Every current habit with checklist items, in habit-id order, done or not.
+    checklists: list[HabitChecklist] = []

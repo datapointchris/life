@@ -15,6 +15,7 @@ The apps are `tasks`, `countdowns`, `events`, `habits`, `books`,
 `articles`, `autotasks`, `recipes`, `cooking-techniques` and `strains`. Each
 takes `{list,show,search,create,edit,delete}` plus the verbs its own domain needs
 — `articles current` and `articles read`, `habits complete` and `habits today`,
+`habits tick` and `untick` with `habits items` for a habit's checklist,
 `tasks snooze`, `pin`, `unpin`, `drop` and `reopen` with `tasks categories` for each
 category's window, the recipe suggest/import flows, `recipes vocabulary` and
 `strains vocabulary`.

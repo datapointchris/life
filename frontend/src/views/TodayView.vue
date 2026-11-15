@@ -198,7 +198,10 @@
             v-for="habit in habits"
             :key="habit.id"
             class="today-row"
-            :class="{ 'today-row--checking': checking.has(habitKey(habit)) }"
+            :class="{
+              'today-row--checking': checking.has(habitKey(habit)),
+              'today-row--with-checklist': habitsStore.checklistFor(habit.id),
+            }"
             data-testid="today-habit"
           >
             <button
@@ -212,6 +215,10 @@
               <i class="fa-solid fa-check"></i>
             </button>
             <span class="today-row__name">{{ habit.name }}</span>
+            <HabitChecklistBoxes
+              v-if="habitsStore.checklistFor(habit.id)"
+              :checklist="habitsStore.checklistFor(habit.id)!"
+            />
           </li>
         </ul>
       </template>
@@ -324,6 +331,10 @@ import { useNotifications } from '@/composables/useNotifications'
 import type { CompletedTask } from '@/stores/tasks'
 import { TASK_CATEGORIES } from '@/stores/tasks'
 import { type TodayPart, daysUntil, useTodayStore } from '@/stores/today'
+import { useHabitsStore } from '@/stores/habits'
+import HabitChecklistBoxes from '@/components/habits/HabitChecklistBoxes.vue'
+
+const habitsStore = useHabitsStore()
 
 type AddMode = 'task' | 'shopping'
 

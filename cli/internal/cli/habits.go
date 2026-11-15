@@ -37,6 +37,7 @@ func newHabitsCommand() *cobra.Command {
 	})
 	goclikit.WithRecoveryHints(cmd, habitHints...)
 	splitReadingFromChanging(cmd)
+	cmd.AddGroup(&cobra.Group{ID: groupHabitItems, Title: "Checklist commands:"})
 	cmd.AddCommand(inGroup(groupReading,
 		newHabitsTodayCommand(),
 		newHabitsListCommand(),
@@ -51,7 +52,10 @@ func newHabitsCommand() *cobra.Command {
 		goclikit.WithRecoveryHints(newHabitsEditCommand(), habitAndCategoryHints...),
 		newHabitsDeleteCommand(),
 		newHabitsCompleteCommand(),
+		newHabitsTickCommand(),
+		newHabitsUntickCommand(),
 	)...)
+	cmd.AddCommand(inGroup(groupHabitItems, newHabitItemsCommand())...)
 	return cmd
 }
 
@@ -155,6 +159,13 @@ func printHabitsDay(out io.Writer, board api.HabitsDay) {
 	_ = tw.Flush()
 	if len(board.Due) > 0 {
 		_, _ = fmt.Fprintln(out, "\nComplete one with `life habits complete <id>`.")
+	}
+	for _, checklist := range board.Checklists {
+		_, _ = fmt.Fprintln(out)
+		printChecklist(out, checklist)
+	}
+	if len(board.Checklists) > 0 {
+		_, _ = fmt.Fprintln(out, "\nTick an item with `life habits tick <item>`.")
 	}
 }
 

@@ -16,6 +16,7 @@ import type {
   HabitCompleted,
   HabitCompletedCreate,
   HabitsDay,
+  HabitChecklist,
 } from '@/api/client'
 
 const logger = createLogger('HabitsStore')
@@ -69,6 +70,7 @@ export const useHabitsStore = defineStore('habits', () => {
   // endpoint, so all three answer it the same way.
   const dayDue = ref<Habit[]>([])
   const dayCompleted = ref<HabitCompleted[]>([])
+  const dayChecklists = ref<HabitChecklist[]>([])
 
   const loading = ref(false)
   const error = ref<ApiError | null>(null)
@@ -393,12 +395,65 @@ export const useHabitsStore = defineStore('habits', () => {
       const board = await loadDay(day)
       if (token !== dayRequest) return
       selectedDate.value = day
-      dayDue.value = board.due
-      dayCompleted.value = board.completed
+      showBoard(board)
     } catch {
       // error already set by the loader; the day on screen does not move
     } finally {
       if (token === dayRequest) loading.value = false
+    }
+  }
+
+  function showBoard(board: HabitsDay) {
+    dayDue.value = board.due
+    dayCompleted.value = board.completed
+    dayChecklists.value = board.checklists ?? []
+  }
+
+  /** The day's checklist of a habit, or undefined for a habit with no items. */
+  function checklistFor(habitId: number | null): HabitChecklist | undefined {
+    return dayChecklists.value.find((c) => c.habit_id === habitId)
+  }
+
+  // A tick or untick that moves the habit into or out of done reloads the board
+  // without the loading state, so the habit changes column and nothing flashes.
+  async function applyChecklist(checklist: HabitChecklist) {
+    const before = checklistFor(checklist.habit_id)
+    dayChecklists.value = dayChecklists.value.map((c) => (c.habit_id === checklist.habit_id ? checklist : c))
+    if (before?.complete === checklist.complete || checklist.date !== selectedDate.value) return
+    const token = ++dayRequest
+    const board = await loadDay(selectedDate.value)
+    if (token === dayRequest) showBoard(board)
+  }
+
+  /** Records one time an item was done on the day on screen. */
+  async function tickItem(itemId: number) {
+    error.value = null
+    refreshToday()
+    assertSelectableDay(selectedDate.value, today.value)
+    try {
+      const response = await api.post<HabitChecklist>(`/habits/items/${itemId}/ticks`, { tick_date: selectedDate.value })
+      logger.info('habit_item_ticked', { item: itemId, day: selectedDate.value, complete: response.data.complete })
+      await applyChecklist(response.data)
+    } catch (e) {
+      const apiError = e instanceof ApiError ? e : new ApiError({ message: String(e), detail: String(e) })
+      error.value = apiError
+      logger.error('habit_item_tick_failed', { item: itemId, detail: apiError.detail, status: apiError.status })
+      throw apiError
+    }
+  }
+
+  /** Removes one tick, such as a set tapped by mistake. */
+  async function untickItem(itemId: number, tickId: number) {
+    error.value = null
+    try {
+      const response = await api.delete<HabitChecklist>(`/habits/items/${itemId}/ticks/${tickId}`)
+      logger.info('habit_item_unticked', { item: itemId, tick: tickId, complete: response.data.complete })
+      await applyChecklist(response.data)
+    } catch (e) {
+      const apiError = e instanceof ApiError ? e : new ApiError({ message: String(e), detail: String(e) })
+      error.value = apiError
+      logger.error('habit_item_untick_failed', { item: itemId, tick: tickId, detail: apiError.detail, status: apiError.status })
+      throw apiError
     }
   }
 
@@ -464,6 +519,7 @@ export const useHabitsStore = defineStore('habits', () => {
     completedHabits,
     dayDue,
     dayCompleted,
+    dayChecklists,
     loading,
     error,
     selectedFilter,
@@ -497,6 +553,9 @@ export const useHabitsStore = defineStore('habits', () => {
     completeHabit,
     deleteCompleted,
     fetchDailyData,
+    checklistFor,
+    tickItem,
+    untickItem,
     selectDay,
     stepDay,
     goToToday,

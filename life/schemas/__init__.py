@@ -50,6 +50,13 @@ from life.schemas.habit import HabitCreate
 from life.schemas.habit import HabitUpdate
 from life.schemas.habitcategory import HabitCategoryCreate
 from life.schemas.habitcategory import HabitCategoryUpdate
+from life.schemas.habitchecklist import HabitChecklist
+from life.schemas.habitchecklist import HabitChecklistItem
+from life.schemas.habitchecklist import HabitChecklistItemCreate
+from life.schemas.habitchecklist import HabitChecklistItemDay
+from life.schemas.habitchecklist import HabitChecklistItemUpdate
+from life.schemas.habitchecklist import HabitItemTick
+from life.schemas.habitchecklist import HabitItemTickCreate
 from life.schemas.habitcompleted import HabitCompleted
 from life.schemas.habitcompleted import HabitCompletedCreate
 from life.schemas.habitday import HabitsDay
@@ -166,6 +173,13 @@ __all__ = [
     'HabitCategory',
     'HabitCategoryCreate',
     'HabitCategoryUpdate',
+    'HabitChecklist',
+    'HabitChecklistItem',
+    'HabitChecklistItemCreate',
+    'HabitChecklistItemDay',
+    'HabitChecklistItemUpdate',
+    'HabitItemTick',
+    'HabitItemTickCreate',
     'HabitsDay',
     'MoneyWasted',
     'MoneyWastedCreate',

@@ -72,6 +72,7 @@
               v-for="habit in habits"
               :key="habit.id"
               class="habits__item"
+              :class="{ 'habits__item--with-checklist': store.checklistFor(habit.id) }"
             >
               <span class="habits__item-name">{{ habit.name }}</span>
               <button
@@ -81,6 +82,10 @@
               >
                 <i class="fa-solid fa-check"></i>
               </button>
+              <HabitChecklistBoxes
+                v-if="store.checklistFor(habit.id)"
+                :checklist="store.checklistFor(habit.id)!"
+              />
             </div>
           </div>
         </template>
@@ -102,9 +107,14 @@
               v-for="habit in habits"
               :key="habit.id"
               class="habits__item habits__item--done"
+              :class="{ 'habits__item--with-checklist': store.checklistFor(habit.habit_id) }"
             >
               <span class="habits__item-name">{{ habit.name }}</span>
               <i class="fa-solid fa-circle-check habits__done-icon"></i>
+              <HabitChecklistBoxes
+                v-if="store.checklistFor(habit.habit_id)"
+                :checklist="store.checklistFor(habit.habit_id)!"
+              />
             </div>
           </div>
         </template>
@@ -120,6 +130,7 @@ import { useNotifications } from '@/composables/useNotifications'
 import { ApiError } from '@/api/errors'
 import AppSubnav from '@/components/AppSubnav.vue'
 import DatePicker from '@/components/DatePicker.vue'
+import HabitChecklistBoxes from '@/components/habits/HabitChecklistBoxes.vue'
 import { HABITS_SUBNAV } from '@/config/subnavLinks'
 
 const subnavLinks = HABITS_SUBNAV
