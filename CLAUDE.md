@@ -82,7 +82,11 @@ with too little text, each as its own exception.
 
 One caller is deliberately outside it, because it is not a third-party page
 fetch: OIDC discovery in `api/oidc_auth.py`, which talks to the identity provider
-with its own user agent and a caller-supplied timeout.
+with its own user agent and a caller-supplied timeout. `api/smoke_tests.py` also
+imports `httpx2`, but drives the app in-process through `ASGITransport`, so
+nothing leaves it. `tests/life/services/test_outbound_http_is_the_only_http_client.py`
+fails on an HTTP client imported anywhere else in `life/`, naming the file and
+line; a new exception goes in its `ALLOWED` with the reason.
 
 Two subprocesses are sanctioned: the one in `scheduler/jobs.py`, and the Claude
 Code CLI that `claude-agent-sdk` starts for each call from
