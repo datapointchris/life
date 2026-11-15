@@ -492,6 +492,24 @@ export interface HabitsDay {
   checklists: HabitChecklist[]
 }
 
+/** One thing a habit's day asks for, done `daily_target` times. */
+export interface HabitChecklistItem {
+  id: number
+  habit_id: number
+  name: string
+  daily_target: number
+}
+
+export interface HabitChecklistItemCreate {
+  name: string
+  daily_target: number
+}
+
+export interface HabitChecklistItemUpdate {
+  name?: string
+  daily_target?: number
+}
+
 /** One time a checklist item was done. */
 export interface HabitItemTick {
   id: number

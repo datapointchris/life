@@ -17,9 +17,18 @@ import type {
   HabitCompletedCreate,
   HabitsDay,
   HabitChecklist,
+  HabitChecklistItem,
+  HabitChecklistItemUpdate,
 } from '@/api/client'
 
 const logger = createLogger('HabitsStore')
+
+/** A checklist item as the habit editor holds it; `id` is null until it is saved. */
+export interface ChecklistItemDraft {
+  id: number | null
+  name: string
+  daily_target: number
+}
 
 // A day key is YYYY-MM-DD naming a real calendar day, no later than today. Throws
 // rather than substituting, so a caller can tell "showed your day" from "showed
@@ -457,6 +466,52 @@ export const useHabitsStore = defineStore('habits', () => {
     }
   }
 
+  async function fetchChecklistItems(habitId: number): Promise<HabitChecklistItem[]> {
+    error.value = null
+    try {
+      const response = await api.get<HabitChecklistItem[]>(`/habits/${habitId}/items`)
+      return response.data
+    } catch (e) {
+      const apiError = e instanceof ApiError ? e : new ApiError({ message: String(e), detail: String(e) })
+      error.value = apiError
+      logger.error('habit_items_fetch_failed', { habit: habitId, detail: apiError.detail, status: apiError.status })
+      throw apiError
+    }
+  }
+
+  /**
+   * Make a habit's checklist match the editor's rows. Each row keeps its item's id,
+   * so its past ticks stay with it, and the server settles today's completion
+   * after every change.
+   */
+  async function saveChecklist(habitId: number, rows: ChecklistItemDraft[]) {
+    error.value = null
+    try {
+      const saved = await fetchChecklistItems(habitId)
+      const kept = new Set(rows.flatMap((r) => (r.id == null ? [] : [r.id])))
+      for (const item of saved.filter((s) => !kept.has(s.id))) {
+        await api.delete(`/habits/items/${item.id}`)
+      }
+      for (const row of rows) {
+        const before = saved.find((s) => s.id === row.id)
+        if (!before) continue
+        const changes: HabitChecklistItemUpdate = {}
+        if (row.name !== before.name) changes.name = row.name
+        if (row.daily_target !== before.daily_target) changes.daily_target = row.daily_target
+        if (Object.keys(changes).length) await api.patch(`/habits/items/${row.id}`, changes)
+      }
+      for (const row of rows.filter((r) => r.id == null)) {
+        await api.post(`/habits/${habitId}/items`, { name: row.name, daily_target: row.daily_target })
+      }
+      logger.info('habit_checklist_saved', { habit: habitId, items: rows.length })
+    } catch (e) {
+      const apiError = e instanceof ApiError ? e : new ApiError({ message: String(e), detail: String(e) })
+      error.value = apiError
+      logger.error('habit_checklist_save_failed', { habit: habitId, detail: apiError.detail, status: apiError.status })
+      throw apiError
+    }
+  }
+
   /**
    * Show a day, ignoring one that is not selectable. The UI cannot offer such a day
    * — the next arrow stops at today and the picker will not open past it — so this
@@ -556,6 +611,8 @@ export const useHabitsStore = defineStore('habits', () => {
     checklistFor,
     tickItem,
     untickItem,
+    fetchChecklistItems,
+    saveChecklist,
     selectDay,
     stepDay,
     goToToday,

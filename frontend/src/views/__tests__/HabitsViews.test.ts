@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
 import HabitsView from '../HabitsView.vue'
 import HabitsManageView from '../HabitsManageView.vue'
@@ -395,17 +395,20 @@ describe('HabitsManageView', () => {
     expect(wrapper.findComponent({ name: 'AddEditHabitModal' }).props('editData')).toBeNull()
   })
 
-  it('opens edit habit modal with habit data', async () => {
+  it('opens edit habit modal with the habit and its checklist', async () => {
     const wrapper = createManageWrapper({
       habits: testHabits,
       categories: testCategories,
     })
+    const items = [{ id: 4, habit_id: 1, name: 'Push-up', daily_target: 5 }]
+    vi.mocked(useHabitsStore().fetchChecklistItems).mockResolvedValue(items)
 
     await wrapper.find('[data-testid="habit-edit-button"]').trigger('click')
+    await flushPromises()
 
     const modal = wrapper.findComponent({ name: 'AddEditHabitModal' })
     expect(modal.props('visible')).toBe(true)
-    expect(modal.props('editData')).toEqual({ id: 1, name: 'Exercise', category_id: 1 })
+    expect(modal.props('editData')).toEqual({ id: 1, name: 'Exercise', category_id: 1, items })
   })
 
   it('opens add category modal', async () => {

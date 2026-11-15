@@ -53,3 +53,30 @@
     }
   }
 }
+
+// The checklist's rows in the habit editor: a name, the times a day, a remove button.
+.habit-checklist-editor {
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-xs);
+  }
+
+  &__row {
+    display: grid;
+    grid-template-columns: 1fr 5rem auto;
+    gap: var(--space-xs);
+    margin-bottom: var(--space-3xs);
+    align-items: center;
+  }
+
+  &__target {
+    text-align: right;
+  }
+
+  &__empty {
+    color: var(--clr-gray-500);
+    font-style: italic;
+  }
+}

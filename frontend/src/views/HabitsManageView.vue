@@ -194,10 +194,18 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useHabitsStore } from '@/stores/habits'
+import { useHabitsStore, type ChecklistItemDraft } from '@/stores/habits'
 import { useNotifications } from '@/composables/useNotifications'
 import { ApiError } from '@/api/errors'
-import type { Habit, HabitCreate, HabitUpdate, HabitCategory, HabitCategoryCreate, HabitCategoryUpdate } from '@/api/client'
+import type {
+  Habit,
+  HabitCreate,
+  HabitUpdate,
+  HabitCategory,
+  HabitCategoryCreate,
+  HabitCategoryUpdate,
+  HabitChecklistItem,
+} from '@/api/client'
 import ActionButton from '@/components/ActionButton.vue'
 import AppSubnav from '@/components/AppSubnav.vue'
 import { HABITS_SUBNAV } from '@/config/subnavLinks'
@@ -210,7 +218,7 @@ const store = useHabitsStore()
 const { show: notify } = useNotifications()
 
 const showHabitModal = ref(false)
-const editHabitTarget = ref<{ id: number; name: string; category_id: number } | null>(null)
+const editHabitTarget = ref<{ id: number; name: string; category_id: number; items: HabitChecklistItem[] } | null>(null)
 const showCategoryModal = ref(false)
 const editCategoryTarget = ref<{ id: number; name: string } | null>(null)
 
@@ -218,13 +226,15 @@ onMounted(() => {
   store.fetchManageData()
 })
 
-function openEditHabit(habit: Habit) {
-  editHabitTarget.value = {
-    id: habit.id,
-    name: habit.name,
-    category_id: habit.category_id,
+async function openEditHabit(habit: Habit) {
+  try {
+    const items = await store.fetchChecklistItems(habit.id)
+    editHabitTarget.value = { id: habit.id, name: habit.name, category_id: habit.category_id, items }
+    showHabitModal.value = true
+  } catch (e) {
+    const detail = e instanceof ApiError ? e.userMessage : String(e)
+    notify(`Failed to load ${habit.name}'s checklist: ${detail}`, 'error')
   }
-  showHabitModal.value = true
 }
 
 function closeHabitModal() {
@@ -245,9 +255,10 @@ function closeCategoryModal() {
   editCategoryTarget.value = null
 }
 
-async function handleCreateHabit(data: HabitCreate) {
+async function handleCreateHabit(data: HabitCreate, checklist: ChecklistItemDraft[]) {
   try {
-    await store.createHabit(data)
+    const habit = await store.createHabit(data)
+    if (checklist.length) await store.saveChecklist(habit.id, checklist)
     notify(`${data.name} added`, 'success')
   } catch (e) {
     const detail = e instanceof ApiError ? e.userMessage : String(e)
@@ -255,10 +266,11 @@ async function handleCreateHabit(data: HabitCreate) {
   }
 }
 
-async function handleUpdateHabit(id: number, data: HabitUpdate) {
+async function handleUpdateHabit(id: number, data: HabitUpdate, checklist: ChecklistItemDraft[]) {
   const name = store.habits.find((h) => h.id === id)?.name ?? 'Habit'
   try {
     await store.updateHabit(id, data)
+    await store.saveChecklist(id, checklist)
     notify(`${name} updated`, 'success')
   } catch (e) {
     const detail = e instanceof ApiError ? e.userMessage : String(e)
