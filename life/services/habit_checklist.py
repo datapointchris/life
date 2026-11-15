@@ -2,8 +2,9 @@
 
 A habit with checklist items completes itself. The tick that brings every item
 to its target records the habit's completion for that day, and the untick that
-takes one back below its target removes it. Only crossing the line acts, so a
-completion recorded by hand stays put while the ticks never reached the targets.
+takes one back below its target removes it. Adding, editing or removing an item
+does the same for today. Only crossing the line acts, so a completion recorded
+by hand stays put while the ticks never reached the targets.
 """
 
 import datetime as dt
@@ -74,16 +75,28 @@ def completions_on(session: Session, habit: models.Habit, day: dt.date) -> list[
     return list(session.scalars(query))
 
 
+def settle(session: Session, habit: models.Habit, day: dt.date, was_complete: bool) -> schemas.HabitChecklist:
+    """Record or remove the day's completion when a change carried the checklist across its line, then commit.
+
+    A habit left with no items is not decided by a checklist, so its completion stays as it is.
+    """
+    session.flush()
+    after = checklist(session, habit, day)
+    if after.items and after.complete and not was_complete and not completions_on(session, habit, day):
+        session.add(models.HabitCompleted(habit_id=habit.id, name=habit.name, category_id=habit.category_id, complete_date=day))
+    if after.items and was_complete and not after.complete:
+        session.execute(
+            delete(models.HabitCompleted).where(models.HabitCompleted.habit_id == habit.id, models.HabitCompleted.complete_date == day)
+        )
+    session.commit()
+    return after
+
+
 def tick(session: Session, item: models.HabitChecklistItem, day: dt.date) -> schemas.HabitChecklist:
     habit = session.get_one(models.Habit, item.habit_id)
     was_complete = checklist(session, habit, day).complete
     session.add(models.HabitItemTick(item_id=item.id, habit_id=habit.id, name=item.name, tick_date=day))
-    session.flush()
-    after = checklist(session, habit, day)
-    if after.complete and not was_complete and not completions_on(session, habit, day):
-        session.add(models.HabitCompleted(habit_id=habit.id, name=habit.name, category_id=habit.category_id, complete_date=day))
-    session.commit()
-    return after
+    return settle(session, habit, day, was_complete)
 
 
 def untick(session: Session, item: models.HabitChecklistItem, recorded: models.HabitItemTick) -> schemas.HabitChecklist:
@@ -91,11 +104,35 @@ def untick(session: Session, item: models.HabitChecklistItem, recorded: models.H
     day = recorded.tick_date
     was_complete = checklist(session, habit, day).complete
     session.delete(recorded)
-    session.flush()
-    after = checklist(session, habit, day)
-    if was_complete and not after.complete:
-        session.execute(
-            delete(models.HabitCompleted).where(models.HabitCompleted.habit_id == habit.id, models.HabitCompleted.complete_date == day)
-        )
-    session.commit()
-    return after
+    return settle(session, habit, day, was_complete)
+
+
+# An item change redefines done from now on, so it settles today and leaves past days' completions as history.
+
+
+def add_item(session: Session, habit: models.Habit, fields: schemas.HabitChecklistItemCreate, today: dt.date) -> models.HabitChecklistItem:
+    was_complete = checklist(session, habit, today).complete
+    item = models.HabitChecklistItem(habit_id=habit.id, **fields.model_dump())
+    session.add(item)
+    settle(session, habit, today, was_complete)
+    session.refresh(item)
+    return item
+
+
+def change_item(
+    session: Session, item: models.HabitChecklistItem, changes: schemas.HabitChecklistItemUpdate, today: dt.date
+) -> models.HabitChecklistItem:
+    habit = session.get_one(models.Habit, item.habit_id)
+    was_complete = checklist(session, habit, today).complete
+    for attr, value in changes.model_dump(exclude_unset=True).items():
+        setattr(item, attr, value)
+    settle(session, habit, today, was_complete)
+    session.refresh(item)
+    return item
+
+
+def remove_item(session: Session, item: models.HabitChecklistItem, today: dt.date) -> None:
+    habit = session.get_one(models.Habit, item.habit_id)
+    was_complete = checklist(session, habit, today).complete
+    session.delete(item)
+    settle(session, habit, today, was_complete)

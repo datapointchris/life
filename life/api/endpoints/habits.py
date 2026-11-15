@@ -24,6 +24,10 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
+def today_in(zone: str) -> dt.date:
+    return dt.datetime.now(ZoneInfo(zone)).date()
+
+
 @router.post('', response_model=schemas.Habit, status_code=status.HTTP_201_CREATED)
 def create_habit(habit: schemas.HabitCreate, session: DbSession):
     db_obj = models.Habit(**habit.model_dump())
@@ -114,7 +118,7 @@ def read_day(session: DbSession, zone: RequestZone, date: dt.date | None = None)
     Declared above `/{id}/`: FastAPI matches in declaration order, so below it
     `day` would be parsed as a habit id.
     """
-    day = date if date is not None else dt.datetime.now(ZoneInfo(zone)).date()
+    day = date if date is not None else today_in(zone)
 
     # `placement` ties every completion carrying no `habit_id`, and `list.sort`
     # is stable, so an unordered SELECT would leave their order to the planner.
@@ -147,32 +151,27 @@ def read_items(id: int, session: DbSession, limit: RowLimit = None):
 
 
 @router.post('/{id}/items', response_model=schemas.HabitChecklistItem, status_code=status.HTTP_201_CREATED)
-def create_item(id: int, item: schemas.HabitChecklistItemCreate, session: DbSession):
-    if session.get(models.Habit, id) is None:
+def create_item(id: int, item: schemas.HabitChecklistItemCreate, session: DbSession, zone: RequestZone):
+    """Add an item, and settle today's completion in the request's zone."""
+    habit = session.get(models.Habit, id)
+    if habit is None:
         raise NotFoundException('habit', id, logger)
-    db_obj = models.HabitChecklistItem(habit_id=id, **item.model_dump())
-    session.add(db_obj)
-    session.commit()
-    session.refresh(db_obj)
-    return db_obj
+    return habit_checklist.add_item(session, habit, item, today_in(zone))
 
 
 @router.patch('/items/{item_id}', response_model=schemas.HabitChecklistItem, status_code=status.HTTP_200_OK)
-def update_item(item_id: int, update: schemas.HabitChecklistItemUpdate, session: DbSession):
+def update_item(item_id: int, update: schemas.HabitChecklistItemUpdate, session: DbSession, zone: RequestZone):
+    """Rename an item or change its target, and settle today's completion in the request's zone."""
     if item := session.get(models.HabitChecklistItem, item_id):
-        for attr, value in update.model_dump(exclude_unset=True).items():
-            setattr(item, attr, value)
-        session.commit()
-        session.refresh(item)
-        return item
+        return habit_checklist.change_item(session, item, update, today_in(zone))
     raise NotFoundException('checklist item', item_id, logger)
 
 
 @router.delete('/items/{item_id}', status_code=status.HTTP_204_NO_CONTENT)
-def delete_item(item_id: int, session: DbSession):
+def delete_item(item_id: int, session: DbSession, zone: RequestZone):
+    """Remove an item, keeping its ticks as history, and settle today's completion in the request's zone."""
     if item := session.get(models.HabitChecklistItem, item_id):
-        session.delete(item)
-        session.commit()
+        habit_checklist.remove_item(session, item, today_in(zone))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     raise NotFoundException('checklist item', item_id, logger)
 
@@ -186,7 +185,7 @@ def create_tick(item_id: int, tick: schemas.HabitItemTickCreate, session: DbSess
     item = session.get(models.HabitChecklistItem, item_id)
     if item is None:
         raise NotFoundException('checklist item', item_id, logger)
-    day = tick.tick_date if tick.tick_date is not None else dt.datetime.now(ZoneInfo(zone)).date()
+    day = tick.tick_date if tick.tick_date is not None else today_in(zone)
     return habit_checklist.tick(session, item, day)
 
 

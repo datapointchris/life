@@ -53,3 +53,20 @@ def test_an_untick_below_target_takes_the_completion_back(client):
     done, checklist = board_for(client, habit['id'])
     assert not done
     assert checklist['items'][0]['ticks'] == []
+
+
+def test_editing_the_checklist_settles_today(client):
+    habit = current_habit(client)
+    squat = client.post(f'/habits/{habit["id"]}/items', json={'name': 'Squat', 'daily_target': 3}).json()
+    client.post(f'/habits/items/{squat["id"]}/ticks', json={})
+    client.post(f'/habits/items/{squat["id"]}/ticks', json={})
+    assert not board_for(client, habit['id'])[0]
+
+    assert client.patch(f'/habits/items/{squat["id"]}', json={'daily_target': 2}).status_code == status.HTTP_200_OK
+    assert board_for(client, habit['id'])[0]
+
+    lunge = client.post(f'/habits/{habit["id"]}/items', json={'name': 'Lunge', 'daily_target': 1}).json()
+    assert not board_for(client, habit['id'])[0]
+
+    assert client.delete(f'/habits/items/{lunge["id"]}').status_code == status.HTTP_204_NO_CONTENT
+    assert board_for(client, habit['id'])[0]
