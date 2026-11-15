@@ -23,7 +23,7 @@ class DiagramGeneratorPlugin(BasePlugin):
         self.logger = logging.getLogger(__name__)
         self.enabled = True
         self.is_serve_mode = False
-        self.last_generation_time = 0
+        self.last_generation_time = 0.0
         self.min_generation_interval = 3600  # 1 hour
 
     def on_config(self, config):

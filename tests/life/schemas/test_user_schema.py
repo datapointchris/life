@@ -25,7 +25,7 @@ class TestUserSchema:
     def test_user_create_invalid_missing_fields(self):
         """Test UserCreate fails with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
-            UserCreate(name='Test User', email='test@example.com')
+            UserCreate.model_validate({'name': 'Test User', 'email': 'test@example.com'})
 
         errors = exc_info.value.errors()
         assert any(err['type'] == 'missing' and err['loc'][0] == 'password' for err in errors)
@@ -81,6 +81,7 @@ class TestUserSchema:
         user_update = UserUpdate(**update_data)
         assert user_update.name == 'Updated Name'
         assert user_update.last_login == now
+        assert user_update.preferences is not None
         assert user_update.preferences['theme'] == 'light'
         assert user_update.email is None
         assert user_update.password is None

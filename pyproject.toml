@@ -191,7 +191,7 @@ max_blank_lines = 1
 [tool.mypy]
 pretty = true
 ignore_missing_imports = true
-check_untyped_defs = false
+check_untyped_defs = true
 warn_return_any = false
 plugins = ["pydantic.mypy"]
 

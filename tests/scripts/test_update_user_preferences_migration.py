@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.update_user_preferences_migration import fill_missing_default_preferences
@@ -28,7 +30,7 @@ class TestFillMissingDefaultPreferences:
         assert result == user_prefs  # No changes if no missing keys
 
     def test_empty_user_prefs(self):
-        user_prefs = {}
+        user_prefs: dict[str, Any] = {}
         default_prefs = {'a': 0, 'b': {'ba': 20, 'bb': 22}, 'c': 3}
         result = fill_missing_default_preferences(user_prefs, default_prefs)
         assert result == default_prefs
@@ -92,7 +94,7 @@ class TestUpdatePreferenceKeys:
 
     def test_nested_conflict_transfe_no_default(self):
         user_prefs = {'nested': {'old_key': {'deep_key1': 'value1'}}}
-        default_prefs = {'nested': {'new_key': {}}}
+        default_prefs: dict[str, Any] = {'nested': {'new_key': {}}}
         transfer_map = {'nested.old_key.deep_key1': 'nested.new_key.deep_key2'}
         with pytest.raises(KeyError):
             update_preference_keys(user_prefs, default_prefs, transfer_map)
@@ -150,7 +152,7 @@ class TestUpdatePreferenceKeys:
     def test_empty_transfer_map(self):
         user_prefs = {'static_key': 1}
         default_prefs = {'static_key': 0}
-        transfer_map = {}
+        transfer_map: dict[str, Any] = {}
         result = update_preference_keys(user_prefs, default_prefs, transfer_map)
         assert result == user_prefs  # No transfer if map is empty
 
@@ -170,7 +172,7 @@ class TestPruneUnusedPreferences:
         assert result == user_prefs  # No changes if all keys required
 
     def test_empty_user_prefs(self):
-        user_prefs = {}
+        user_prefs: dict[str, Any] = {}
         default_prefs = {'a': 0}
         result = prune_unused_preferences(user_prefs, default_prefs)
         assert result == {}  # No changes if user_prefs is empty
@@ -184,7 +186,7 @@ class TestUpdatePreferences:
         assert updated_prefs == {'a': 1, 'b': 2, 'c': 3}
 
     def test_update_preferences_with_empty_user_prefs(self):
-        user_prefs = {}
+        user_prefs: dict[str, Any] = {}
         default_prefs = {'a': 0, 'b': 2, 'c': 3}
         updated_prefs = update_preferences(user_prefs, default_prefs)
         assert updated_prefs == {'a': 0, 'b': 2, 'c': 3}

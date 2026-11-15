@@ -60,10 +60,7 @@ class TestBookCreateSchema:
     def test_create_requires_tags(self):
         """Tags field is required — omitting it should raise ValidationError."""
         with pytest.raises(ValidationError):
-            BookCreate(
-                title='No Tags',
-                author='Test Author',
-            )
+            BookCreate.model_validate({'title': 'No Tags', 'author': 'Test Author'})
 
     def test_create_rejects_empty_tags(self):
         """An empty tags list should be rejected — at least one tag is required."""
@@ -77,18 +74,12 @@ class TestBookCreateSchema:
     def test_create_requires_title(self):
         """Title is required."""
         with pytest.raises(ValidationError):
-            BookCreate(
-                author='Test Author',
-                tags=['Fiction'],
-            )
+            BookCreate.model_validate({'author': 'Test Author', 'tags': ['Fiction']})
 
     def test_create_requires_author(self):
         """Author is required."""
         with pytest.raises(ValidationError):
-            BookCreate(
-                title='Test Book',
-                tags=['Fiction'],
-            )
+            BookCreate.model_validate({'title': 'Test Book', 'tags': ['Fiction']})
 
     def test_create_review_defaults_to_none(self):
         """Review should be optional and default to None."""

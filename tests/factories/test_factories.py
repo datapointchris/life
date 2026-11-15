@@ -24,7 +24,7 @@ class TestUserFactory:
 
     def test_create_basic_user(self, factory_session):
         """Test creating a user with defaults."""
-        user = UserFactory()
+        user = UserFactory.create()
         assert user.id is not None
         assert user.name.startswith('Test User')
         assert user.email.startswith('testuser')
@@ -32,12 +32,12 @@ class TestUserFactory:
 
     def test_create_admin_user(self, factory_session):
         """Test creating an admin user with trait."""
-        admin = UserFactory(admin=True)
+        admin = UserFactory.create(admin=True)
         assert admin.is_admin is True
 
     def test_password_is_hashed(self, factory_session):
         """Test that password is hashed on insert."""
-        user = UserFactory(password='mypassword')
+        user = UserFactory.create(password='mypassword')
         assert user.password != 'mypassword'
         assert user.check_password('mypassword')
 
@@ -53,7 +53,7 @@ class TestHabitFactory:
 
     def test_create_habit_with_category(self, factory_session):
         """Test that habits are created with a category."""
-        habit = HabitFactory()
+        habit = HabitFactory.create()
         assert habit.id is not None
         assert habit.category is not None
         assert habit.category_id is not None
@@ -61,21 +61,21 @@ class TestHabitFactory:
 
     def test_create_habit_with_existing_category(self, factory_session):
         """Test creating habits that share a category."""
-        category = HabitCategoryFactory(name='Shared Category')
-        habit1 = HabitFactory(category=category)
-        habit2 = HabitFactory(category=category)
+        category = HabitCategoryFactory.create(name='Shared Category')
+        habit1 = HabitFactory.create(category=category)
+        habit2 = HabitFactory.create(category=category)
 
         assert habit1.category_id == habit2.category_id
         assert habit1.category.name == 'Shared Category'
 
     def test_hibernated_habit(self, factory_session):
         """Test creating a hibernated habit."""
-        habit = HabitFactory(hibernated=True)
+        habit = HabitFactory.create(hibernated=True)
         assert habit.is_current is False
 
     def test_habit_with_hibernated_category(self, factory_session):
         """Test creating a habit with a hibernated category."""
-        habit = HabitFactory(with_hibernated_category=True)
+        habit = HabitFactory.create(with_hibernated_category=True)
         assert habit.category.is_current is False
 
 
@@ -84,14 +84,14 @@ class TestHabitCategoryFactory:
 
     def test_create_basic_category(self, factory_session):
         """Test creating a category with defaults."""
-        category = HabitCategoryFactory()
+        category = HabitCategoryFactory.create()
         assert category.id is not None
         assert category.name.startswith('Test Category')
         assert category.is_current is True
 
     def test_hibernated_category(self, factory_session):
         """Test creating a hibernated category."""
-        category = HabitCategoryFactory(hibernated=True)
+        category = HabitCategoryFactory.create(hibernated=True)
         assert category.is_current is False
 
 
@@ -100,7 +100,7 @@ class TestHabitCompletedFactory:
 
     def test_create_completed_habit(self, factory_session):
         """Test creating a completed habit record."""
-        completed = HabitCompletedFactory()
+        completed = HabitCompletedFactory.create()
         assert completed.id is not None
         assert completed.name.startswith('Completed Habit')
         assert completed.complete_date is not None
@@ -108,7 +108,7 @@ class TestHabitCompletedFactory:
 
     def test_completed_habit_with_existing_category(self, factory_session):
         """Test creating a completed habit with existing category."""
-        category = HabitCategoryFactory(name='Exercise')
+        category = HabitCategoryFactory.create(name='Exercise')
         completed = HabitCompletedFactory.with_category(category)
         assert completed.category.name == 'Exercise'
 
@@ -118,19 +118,19 @@ class TestCountdownFactory:
 
     def test_create_basic_countdown(self, factory_session):
         """Test creating a countdown with defaults."""
-        countdown = CountdownFactory()
+        countdown = CountdownFactory.create()
         assert countdown.id is not None
         assert countdown.name.startswith('Test Countdown')
         assert countdown.due_date > dt.date.today()
 
     def test_past_due_countdown(self, factory_session):
         """Test creating a past due countdown."""
-        countdown = CountdownFactory(past_due=True)
+        countdown = CountdownFactory.create(past_due=True)
         assert countdown.due_date < dt.date.today()
 
     def test_due_today_countdown(self, factory_session):
         """Test creating a countdown due today."""
-        countdown = CountdownFactory(due_today=True)
+        countdown = CountdownFactory.create(due_today=True)
         assert countdown.due_date == dt.date.today()
 
 
@@ -139,14 +139,14 @@ class TestMoneyWastedFactory:
 
     def test_create_basic_money_wasted(self, factory_session):
         """Test creating a money wasted entry."""
-        entry = MoneyWastedFactory()
+        entry = MoneyWastedFactory.create()
         assert entry.id is not None
         assert entry.item.startswith('Wasted Item')
         assert entry.amount > 0
 
     def test_expensive_item(self, factory_session):
         """Test creating an expensive wasted item."""
-        entry = MoneyWastedFactory(expensive=True)
+        entry = MoneyWastedFactory.create(expensive=True)
         assert entry.amount == 500.0
 
 
@@ -155,7 +155,7 @@ class TestBookFactory:
 
     def test_create_basic_book(self, factory_session):
         """Test creating a book with defaults."""
-        book = BookFactory()
+        book = BookFactory.create()
         assert book.id is not None
         assert book.title.startswith('Test Book')
         assert book.isbn is not None
@@ -163,14 +163,14 @@ class TestBookFactory:
 
     def test_reading_book(self, factory_session):
         """Test creating a book currently being read."""
-        book = BookFactory(reading=True)
+        book = BookFactory.create(reading=True)
         assert book.read_start_date is not None
         assert book.read_finish_date is None
         assert book.progress == 'reading'
 
     def test_finished_book(self, factory_session):
         """Test creating a finished book."""
-        book = BookFactory(finished=True)
+        book = BookFactory.create(finished=True)
         assert book.read_start_date is not None
         assert book.read_finish_date is not None
         assert book.rating is not None
@@ -178,7 +178,7 @@ class TestBookFactory:
 
     def test_abandoned_book(self, factory_session):
         """Test creating an abandoned book."""
-        book = BookFactory(abandoned_book=True)
+        book = BookFactory.create(abandoned_book=True)
         assert book.progress == 'abandoned'
 
 
@@ -187,7 +187,7 @@ class TestEventFactory:
 
     def test_create_basic_event(self, factory_session):
         """Test creating an event with defaults."""
-        event = EventFactory()
+        event = EventFactory.create()
         assert event.id is not None
         assert event.name.startswith('Test Event')
         assert event.attending is True
@@ -198,17 +198,17 @@ class TestEventFactory:
 
     def test_not_attending_event(self, factory_session):
         """Test creating an event not attending."""
-        event = EventFactory(not_attending=True)
+        event = EventFactory.create(not_attending=True)
         assert event.attending is False
 
     def test_free_event(self, factory_session):
         """Test creating a free event."""
-        event = EventFactory(free=True)
+        event = EventFactory.create(free=True)
         assert event.cost == 0.0
 
     def test_past_event(self, factory_session):
         """Test creating a past event."""
-        event = EventFactory(past=True)
+        event = EventFactory.create(past=True)
         assert event.date < dt.datetime.now(dt.UTC)
 
 
@@ -217,7 +217,7 @@ class TestBoxFactory:
 
     def test_create_basic_box(self, factory_session):
         """Test creating a box with defaults."""
-        box = BoxFactory()
+        box = BoxFactory.create()
         assert box.id is not None
         assert box.name.startswith('Test Box')
         assert box.size == 'Medium'
@@ -225,12 +225,12 @@ class TestBoxFactory:
 
     def test_essential_box(self, factory_session):
         """Test creating an essential box."""
-        box = BoxFactory(essential_box=True)
+        box = BoxFactory.create(essential_box=True)
         assert box.essential is True
 
     def test_small_box(self, factory_session):
         """Test creating a small box."""
-        box = BoxFactory(small=True)
+        box = BoxFactory.create(small=True)
         assert box.size == 'Small'
 
 
@@ -239,20 +239,20 @@ class TestBoxItemFactory:
 
     def test_create_item_with_box(self, factory_session):
         """Test creating an item with auto-generated box."""
-        item = BoxItemFactory()
+        item = BoxItemFactory.create()
         assert item.id is not None
         assert item.box is not None
         assert item.box_id is not None
 
     def test_create_orphan_item(self, factory_session):
         """Test creating an item without a box."""
-        item = BoxItemFactory(orphan=True)
+        item = BoxItemFactory.create(orphan=True)
         assert item.box is None
         assert item.box_id is None
 
     def test_create_item_in_specific_box(self, factory_session):
         """Test creating items in a specific box."""
-        box = BoxFactory(name='Kitchen Box')
+        box = BoxFactory.create(name='Kitchen Box')
         item1 = BoxItemFactory.in_box(box, name='Plates')
         item2 = BoxItemFactory.in_box(box, name='Cups')
 
@@ -265,7 +265,7 @@ class TestArticleFactory:
 
     def test_create_basic_article(self, factory_session):
         """Test creating an article with defaults."""
-        article = ArticleFactory()
+        article = ArticleFactory.create()
         assert article.id is not None
         assert article.title.startswith('Test Article')
         assert article.is_current is True
@@ -273,17 +273,17 @@ class TestArticleFactory:
 
     def test_favorite_article(self, factory_session):
         """Test creating a favorite article."""
-        article = ArticleFactory(favorite=True)
+        article = ArticleFactory.create(favorite=True)
         assert article.is_favorite is True
 
     def test_archived_article(self, factory_session):
         """Test creating an archived article."""
-        article = ArticleFactory(archived=True)
+        article = ArticleFactory.create(archived=True)
         assert article.is_archived is True
         assert article.is_current is False
 
     def test_read_article(self, factory_session):
         """Test creating a read article."""
-        article = ArticleFactory(read=True)
+        article = ArticleFactory.create(read=True)
         assert article.last_read_date is not None
         assert article.read_count == 1

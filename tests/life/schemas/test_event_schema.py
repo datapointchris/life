@@ -94,7 +94,7 @@ class TestEventSchema:
     def test_event_create_invalid_missing_fields(self):
         """Test EventCreate fails with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
-            EventCreate(name='Concert', venue='Stadium', attending=True)
+            EventCreate.model_validate({'name': 'Concert', 'venue': 'Stadium', 'attending': True})
 
         errors = exc_info.value.errors()
         assert any(err['type'] == 'missing' and err['loc'][0] in ('date', 'cost') for err in errors)

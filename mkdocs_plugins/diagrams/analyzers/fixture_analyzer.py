@@ -41,9 +41,9 @@ class FixtureVisitor(ast.NodeVisitor):
             keywords = decorator.keywords if isinstance(decorator, ast.Call) else []
             for keyword in keywords:
                 if keyword.arg == 'scope' and isinstance(keyword.value, ast.Constant):
-                    scope = keyword.value.value
+                    scope = str(keyword.value.value)
                 elif keyword.arg == 'autouse' and isinstance(keyword.value, ast.Constant):
-                    autouse = keyword.value.value
+                    autouse = bool(keyword.value.value)
 
             self.fixtures[node.name] = {
                 'name': node.name,

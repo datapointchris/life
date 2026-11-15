@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from life import models
@@ -110,7 +112,7 @@ class TestDotPreferenceToNestedDict:
     def test_empty_key(self):
         dot_key = ''
         value = 'grid'
-        expected = {}
+        expected: dict[str, Any] = {}
         result = models.User.dot_preference_to_nested_dict(dot_key, value)
         assert result == expected
 

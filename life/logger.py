@@ -18,6 +18,7 @@ import sys
 import structlog
 from structlog.processors import CallsiteParameter
 from structlog.processors import CallsiteParameterAdder
+from structlog.typing import Processor
 
 LOG_FORMAT = os.environ.get('LOG_FORMAT', 'console')
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
@@ -42,7 +43,7 @@ def use_colors() -> bool:
 def configure_structlog():
     """Render structlog and stdlib records through one root handler on stderr."""
     # Shared processors for both stdlib and structlog
-    shared_processors = [
+    shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt='%Y-%m-%dT%H:%M:%SZ'),

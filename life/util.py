@@ -119,6 +119,7 @@ def log_caller(func):
     @functools.wraps(func)
     def log_calling_function(*args, **kwargs):
         current_frame = inspect.currentframe()
+        assert current_frame is not None and current_frame.f_back is not None
         caller_frame = current_frame.f_back
         caller_name = caller_frame.f_code.co_name
         caller_file = caller_frame.f_code.co_filename

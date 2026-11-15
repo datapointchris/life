@@ -67,6 +67,8 @@ class PrivateServices:
     def start(self) -> None:
         redis = urlsplit(os.environ.get('TEST_REDIS_URL') or self.start_redis())
         postgres = urlsplit(os.environ.get('TEST_DATABASE_URL') or self.start_postgres())
+        assert postgres.hostname is not None and postgres.port is not None, 'the database URL names a host and a port'
+        assert redis.hostname is not None and redis.port is not None, 'the Redis URL names a host and a port'
         for database in (self.settings.postgres, self.settings.sqlalchemy):
             database.host = postgres.hostname
             database.port = postgres.port

@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from fastapi import status
 from sqlalchemy import select
@@ -27,7 +29,7 @@ NUM_FACTORY_USERS = 3
 EXPECTED_LENGTH = NUM_DEFAULT_USERS + NUM_LOGIN_USERS + NUM_FACTORY_USERS
 
 # Test user credentials for factory creation
-TEST_USERS = [
+TEST_USERS: list[dict[str, Any]] = [
     {'name': 'Regular User 1', 'email': 'regular_user_1@test.com', 'password': 'regular_user_1_password', 'is_admin': False},
     {'name': 'Regular User 2', 'email': 'regular_user_2@test.com', 'password': 'regular_user_2_password', 'is_admin': False},
     {'name': 'Admin User', 'email': 'admin@test.com', 'password': 'admin_password', 'is_admin': True},
