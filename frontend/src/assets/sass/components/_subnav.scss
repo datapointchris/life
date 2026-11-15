@@ -5,10 +5,13 @@
   padding-bottom: var(--space-xs);
   border-bottom: var(--border-subnav);
 
+  // Wraps rather than widening the page past a phone's screen.
   &__links {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-s);
     align-items: center;
+    min-width: 0;
   }
 
   &__actions {
