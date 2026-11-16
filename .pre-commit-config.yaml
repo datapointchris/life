@@ -1,4 +1,4 @@
-# forge-toolchain: 59
+# forge-toolchain: 61
 fail_fast: true
 default_stages: [pre-commit]
 repos:
@@ -87,17 +87,6 @@ repos:
     rev: v1.0.0
     hooks:
       - id: check-json5
-
-# > custom:after:file-checks - Compose files parse with the real parser
-  - repo: local
-    hooks:
-      - id: docker-compose-validate
-        name: validate docker compose files
-        description: "Validate compose files using the actual Docker Compose parser. Interpolation reads the committed test configuration and no service's env_file is opened, so a checkout without a .env validates."
-        entry: bash -c 'for overlay in "" docker-compose.dev.yml docker-compose.test.yml; do docker compose --env-file tests/testing.env -f docker-compose.yml ${overlay:+-f "$overlay"} config --quiet --no-env-resolution || exit 1; done'
-        language: system
-        files: ^docker-compose.*\.yml$
-        pass_filenames: false
 
 # generated:markdown - Markdown
   - repo: https://github.com/igorshubovych/markdownlint-cli
@@ -426,6 +415,41 @@ repos:
       - id: hadolint
         args: ["--ignore", "DL3008", "--ignore", "DL3018", "--ignore", "DL4006"]
         exclude: '\.dockerignore$'
+
+  # Docker Compose's own parser reads each compose file alone. Interpolation
+  # is off, because the .env a file's ${VARIABLES} read is gitignored, so a
+  # checkout holds none, and a required ${VARIABLE:?} fails without it.
+  # --no-env-resolution leaves each service's env_file unopened for the same
+  # reason. A repo whose files interpolate from a committed env file declares
+  # them as compose_projects, which the next block parses merged.
+  #
+  # `language: system` runs the desk's `docker compose`, so a box without the
+  # compose plugin fails here rather than passing a compose change unread. CI's
+  # hooks job installs the pinned release first. Parsing needs no daemon.
+  - repo: local
+    hooks:
+      - id: docker-compose-config
+        name: docker compose config on each compose file
+        entry: bash -c 'docker compose version > /dev/null 2>&1 || { echo "docker compose is not on this machine, and the hook parses compose files with it" >&2; exit 1; }; for file in "$@"; do docker compose -f "$file" config --quiet --no-env-resolution --no-interpolate || { echo "$file does not parse" >&2; exit 1; }; done' --
+        language: system
+        files: '(^|/)(docker-)?compose([.-][^/]*)?\.ya?ml$'
+
+# generated:docker-compose-projects - Docker Compose projects
+  #
+  # Each project the registry's compose_projects declares, merged in its order
+  # and interpolated from its committed env file. That catches what the docker
+  # block's per-file parse cannot: a malformed ${VARIABLE}, a required one the
+  # env file leaves unset, and an override the base refuses. Each argument is
+  # one project's flags, so a project reads here as the command that checks it.
+  - repo: local
+    hooks:
+      - id: docker-compose-projects
+        name: docker compose config on each declared project
+        entry: bash -c 'docker compose version > /dev/null 2>&1 || { echo "docker compose is not on this machine, and the hook parses compose projects with it" >&2; exit 1; }; for project in "$@"; do read -ra flags <<< "$project"; docker compose "${flags[@]}" config --quiet --no-env-resolution || { echo "docker compose $project config failed" >&2; exit 1; }; done' --
+        language: system
+        args: ["--env-file tests/testing.env -f docker-compose.yml", "--env-file tests/testing.env -f docker-compose.yml -f docker-compose.dev.yml", "--env-file tests/testing.env -f docker-compose.yml -f docker-compose.test.yml", "--env-file tests/testing.env -f docker-compose.yml -f docker-compose.test.yml -f docker-compose.ci.yml"]
+        files: '^(tests/testing\.env|docker-compose\.yml|docker-compose\.dev\.yml|docker-compose\.test\.yml|docker-compose\.ci\.yml)$'
+        pass_filenames: false
 
 # generated:github-actions - GitHub Actions
   - repo: https://github.com/jdx/jactionlint
