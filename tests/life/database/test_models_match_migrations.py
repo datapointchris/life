@@ -8,8 +8,9 @@ the two differ.
 from alembic import command
 
 from life.database.initialization import alembic_config
+from tests.environment import as_owner
 from tests.utils.database import test_settings
 
 
 def test_alembic_check_proposes_no_operations():
-    command.check(alembic_config(test_settings))
+    command.check(alembic_config(as_owner(test_settings)))

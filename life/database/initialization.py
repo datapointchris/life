@@ -20,6 +20,7 @@ import structlog
 from alembic import command
 from alembic.config import Config
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from sqlalchemy import Connection
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -195,22 +196,15 @@ def truncate_all_tables(settings) -> None:
     logger.info('truncate_all_tables_completed')
 
 
-def create_apscheduler_jobstore_table(settings) -> None:
-    """Create the APScheduler jobstore table.
+def create_apscheduler_jobstore_table(connection: Connection) -> None:
+    """Create the APScheduler jobstore table on `connection` where it does not exist.
 
-    APScheduler owns `apscheduler_jobs` and creates it when the scheduler service
-    starts, which is why alembic excludes it from autogenerate. Nothing else
-    creates it — so after a drop-and-recreate the admin scheduler endpoint 500s
-    on a missing relation until the scheduler happens to run, which in the
-    testing stack it never does. Creating it here makes a reset database whole
-    rather than whole-except-one-table.
+    APScheduler owns `apscheduler_jobs`, which is why alembic excludes it from autogenerate. The
+    scheduler logs in as the app role, which holds no DDL, so it cannot create the table itself.
+    The migration run creates it as the owner once it reaches head, and create_all's path does
+    the same, so a new or reset database is whole before the scheduler first starts.
     """
-    logger.info('apscheduler_jobstore_table_creating')
-    jobstore = SQLAlchemyJobStore(url=settings.sqlalchemy.db_uri)
-    # start() is what emits the CREATE TABLE; APScheduler has no public call for
-    # the schema alone. The scheduler argument is unused for table setup.
-    jobstore.start(None, 'default')
-    logger.info('apscheduler_jobstore_table_created')
+    SQLAlchemyJobStore(engine=connection.engine).jobs_t.create(connection, checkfirst=True)
 
 
 def create_tables(settings, use_alembic: bool = True) -> None:
@@ -221,7 +215,6 @@ def create_tables(settings, use_alembic: bool = True) -> None:
     """
     if use_alembic:
         run_alembic_migrations(settings)
-        create_apscheduler_jobstore_table(settings)
         return
 
     logger.info('tables_creating_with_create_all')
@@ -230,8 +223,8 @@ def create_tables(settings, use_alembic: bool = True) -> None:
     with engine.begin() as conn:
         for schema in model_schemas:
             conn.execute(CreateSchema(schema, if_not_exists=True))
-    Base.metadata.create_all(engine)
-    create_apscheduler_jobstore_table(settings)
+        Base.metadata.create_all(conn)
+        create_apscheduler_jobstore_table(conn)
     logger.info('tables_created')
 
 

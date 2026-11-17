@@ -13,6 +13,7 @@ import structlog
 from life.database.initialization import full_initialization
 from life.database.initialization import run_alembic_migrations
 from life.database.session import get_db_engine
+from tests.environment import as_owner
 from tests.utils.database import test_settings
 
 
@@ -25,10 +26,10 @@ def database_state() -> tuple[list[str], str, int]:
 
 
 def test_a_second_initialization_changes_no_schema_revision_or_user():
-    full_initialization(test_settings)
+    full_initialization(as_owner(test_settings))
     before = database_state()
 
-    full_initialization(test_settings)
+    full_initialization(as_owner(test_settings))
 
     assert database_state() == before
 
@@ -39,7 +40,7 @@ def test_initialization_seeds_signups_closed_into_an_empty_settings_table():
     with engine.begin() as conn:
         conn.execute(sa.text('DELETE FROM admin.settings'))
 
-    full_initialization(test_settings)
+    full_initialization(as_owner(test_settings))
 
     with engine.connect() as conn:
         rows = conn.execute(sa.text('SELECT id, is_signup_open FROM admin.settings')).all()
@@ -51,7 +52,7 @@ def test_running_migrations_in_process_leaves_existing_loggers_enabled():
     probe = logging.getLogger('tests.life.database.initialization_probe')
     handlers = list(logging.root.handlers)
 
-    run_alembic_migrations(test_settings)
+    run_alembic_migrations(as_owner(test_settings))
 
     assert probe.disabled is False
     assert logging.root.handlers == handlers

@@ -32,6 +32,7 @@ from life.database.session import get_sqlalchemy_session
 from life.scheduler.main import get_jobstore
 from tests import test_data
 from tests.environment import PrivateServices
+from tests.environment import as_owner
 from tests.factories import clear_factory_session
 from tests.factories import set_factory_session
 from tests.utils.database import clear_test_connection
@@ -118,7 +119,7 @@ def setup_test_environment():
 @pytest.fixture(scope='session')
 def truncate_tables(setup_test_environment):
     """Empty every table the migrations seeded, then insert the rows the app cannot run without."""
-    truncate_all_tables(test_settings)
+    truncate_all_tables(as_owner(test_settings))
     insert_lookup_table_data(test_settings)
     insert_admin_settings(test_settings)
     with create_session(test_settings) as session:

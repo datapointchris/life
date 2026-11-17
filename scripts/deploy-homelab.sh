@@ -54,6 +54,9 @@ FAILURE_OUTPUT=""
 LIVE_COLOR=""
 DEPLOY_COLOR=""
 LOCK_HELD=false
+DATABASE=""
+ROLE_PASSWORDS_BEFORE=""
+ROLES_CONVERGED=false
 
 # --remove-orphans on every up and down, because removing a service from
 # docker-compose.app.yml otherwise leaves its container running forever: neither
@@ -97,10 +100,21 @@ cleanup() {
       compose_app_down "$DEPLOY_COLOR" 2>/dev/null || true
     fi
 
+    local live_state="still serving"
+    if [[ "$ROLES_CONVERGED" == "true" ]]; then
+      if restore_role_passwords; then
+        live_state="still serving, its database logins restored"
+        log_info "role_passwords_restored" | tee -a "$LOG_FILE"
+      else
+        live_state="DOWN: the convergence changed its database login, and restoring it failed"
+        log_error "role_passwords_restore_failed" | tee -a "$LOG_FILE"
+      fi
+    fi
+
     local message="*Commit:* \`${NEW_SHA:0:7}\`"
     message+="\n*Step Failed:* ${FAILURE_STEP:-unknown}"
     message+="\n*Exit Code:* $exit_code"
-    message+="\n*Live Color:* ${LIVE_COLOR:-unknown} (still serving)"
+    message+="\n*Live Color:* ${LIVE_COLOR:-unknown} (${live_state})"
     message+="\n\n*Commit:* $commit_msg"
 
     local context=""
@@ -232,8 +246,9 @@ ensure_infra_running() {
   log_info "infra_check_started" | tee -a "$LOG_FILE"
   cd "$INSTALL_DIR"
 
-  # Start infra if not already running (idempotent)
-  if ! $COMPOSE_INFRA up -d 2>&1 | tee -a "$LOG_FILE"; then
+  # Start infra if not already running (idempotent). The superuser's password comes from the
+  # roles secrets file, which no app container reads.
+  if ! sops exec-env secrets/secrets.postgres-roles.prod.enc.env "$COMPOSE_INFRA up -d" 2>&1 | tee -a "$LOG_FILE"; then
     FAILURE_OUTPUT="Failed to start infrastructure services"
     log_error "infra_startup_failed" | tee -a "$LOG_FILE"
     exit 1
@@ -337,13 +352,60 @@ wait_for_healthy() {
   exit 1
 }
 
+# The API and the scheduler log in as life_app, which this creates on its first
+# run, so it runs before the new color starts. It also sets the owner's and the
+# superuser's passwords from secrets/secrets.postgres-roles.prod.enc.env, which
+# no container is handed.
+# Each role's stored password verifier, as the statements that set it back. Postgres stores a
+# verifier given to ALTER ROLE ... PASSWORD as it is, so no password is read or held.
+save_role_passwords() {
+  docker exec life-infra-postgres psql -U postgres -d "$DATABASE" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT format('ALTER ROLE %I PASSWORD %L;', rolname, rolpassword) FROM pg_authid
+     WHERE rolname IN (session_user, current_database(), current_database() || '_app')
+       AND rolpassword IS NOT NULL"
+}
+
+restore_role_passwords() {
+  printf '%s\n' "$ROLE_PASSWORDS_BEFORE" \
+    | docker exec -i life-infra-postgres psql -U postgres -d "$DATABASE" -XAq -v ON_ERROR_STOP=1 --single-transaction -f - >/dev/null
+}
+
+# The convergence can change a password the live color still logs in with: life's on the
+# first deploy that moves the app to life_app, and life_app's on a rotation. So each role's
+# verifier is saved first, and a deploy that fails before the switch puts them back.
+converge_database_roles() {
+  FAILURE_STEP="database_roles"
+  log_info "database_roles_started" | tee -a "$LOG_FILE"
+  cd "$INSTALL_DIR"
+
+  if ! ROLE_PASSWORDS_BEFORE=$(save_role_passwords); then
+    FAILURE_OUTPUT="Could not read the roles' password verifiers before converging them"
+    log_error "role_passwords_save_failed" | tee -a "$LOG_FILE"
+    exit 1
+  fi
+
+  local roles_output
+  if roles_output=$(scripts/converge-database-roles.sh 2>&1); then
+    ROLES_CONVERGED=true
+    log_info "database_roles_completed" | tee -a "$LOG_FILE"
+  else
+    FAILURE_OUTPUT="$roles_output"
+    log_error "database_roles_failed" "output" "$roles_output" | tee -a "$LOG_FILE"
+    exit 1
+  fi
+}
+
+# The migrations log in as the database's owner, named for the database, whose
+# password the serving containers never hold. It reaches this one command's
+# environment.
 run_migrations() {
   FAILURE_STEP="migrations"
   log_info "migrations_started" "color" "$DEPLOY_COLOR" | tee -a "$LOG_FILE"
   cd "$INSTALL_DIR"
 
   local migration_output
-  if migration_output=$(docker exec -w /app/life "life-${DEPLOY_COLOR}-api" alembic upgrade head 2>&1); then
+  if migration_output=$(sops exec-env secrets/secrets.postgres-roles.prod.enc.env \
+    "docker exec -w /app/life -e POSTGRES_OWNER_PASSWORD life-${DEPLOY_COLOR}-api sh -c 'POSTGRES_USERNAME=\"\$POSTGRES_DB\" POSTGRES_PASSWORD=\"\$POSTGRES_OWNER_PASSWORD\" exec alembic upgrade head'" 2>&1); then
     log_info "migrations_completed" "color" "$DEPLOY_COLOR" "output" "$migration_output" | tee -a "$LOG_FILE"
   else
     FAILURE_OUTPUT="$migration_output"
@@ -476,14 +538,16 @@ main() {
   pull_latest_code
   decrypt_secrets
 
-  # Source Slack webhook URL from decrypted .env
+  # Source Slack webhook URL and the database's name from decrypted .env
   if [[ -f "$INSTALL_DIR/.env" ]]; then
     SLACK_WEBHOOK_URL=$(grep '^SLACK_WEBHOOK_URL=' "$INSTALL_DIR/.env" | cut -d= -f2- | tr -d '"')
     export SLACK_WEBHOOK_URL
+    DATABASE=$(grep '^POSTGRES_DB=' "$INSTALL_DIR/.env" | cut -d= -f2- | tr -d '"')
   fi
 
   determine_colors
   ensure_infra_running
+  converge_database_roles
   pull_new_images
   start_new_containers
   wait_for_healthy

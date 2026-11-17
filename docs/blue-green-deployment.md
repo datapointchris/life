@@ -97,20 +97,21 @@ The deploy script at `scripts/deploy-homelab.sh` runs this sequence:
  3. decrypt_secrets()
  4. determine_colors()          # Read bluegreen-state → LIVE=blue, DEPLOY=green
  5. ensure_infra_running()      # Start life-infra if not already up
- 6. build_new_images()          # Build DEPLOY color images (site stays up on LIVE)
- 7. start_new_containers()      # docker compose up -d for DEPLOY color
- 8. wait_for_healthy()          # Poll Docker healthchecks on DEPLOY containers (90s)
- 9. run_migrations()            # alembic upgrade head on DEPLOY API container
-10. run_smoke_tests()           # Full smoke suite on DEPLOY containers
-11. switch_traffic()            # Generate services.yml → DEPLOY color, atomic mv
-12. update_state()              # Write DEPLOY color to bluegreen-state
-13. grace_period()              # Wait 30s (manual rollback window)
-14. stop_old_containers()       # docker compose down for LIVE color
-15. cleanup_docker()            # Prune old images
-16. notify_slack()
+ 6. converge_database_roles()   # life and life_app, their passwords and grants, as the superuser
+ 7. build_new_images()          # Build DEPLOY color images (site stays up on LIVE)
+ 8. start_new_containers()      # docker compose up -d for DEPLOY color, logged in as life_app
+ 9. wait_for_healthy()          # Poll Docker healthchecks on DEPLOY containers (90s)
+10. run_migrations()            # alembic upgrade head on DEPLOY API container, logged in as life
+11. run_smoke_tests()           # Full smoke suite on DEPLOY containers
+12. switch_traffic()            # Generate services.yml → DEPLOY color, atomic mv
+13. update_state()              # Write DEPLOY color to bluegreen-state
+14. grace_period()              # Wait 30s (manual rollback window)
+15. stop_old_containers()       # docker compose down for LIVE color
+16. cleanup_docker()            # Prune old images
+17. notify_slack()
 ```
 
-If steps 6-10 fail, the LIVE containers keep serving traffic. The deploy script cleans up the failed DEPLOY containers, sends a Slack failure notification, and exits non-zero.
+If any step before `switch_traffic()` fails, the deploy removes the DEPLOY containers, puts back any database password the convergence changed, sends a Slack failure notification and exits non-zero. Traffic stays on LIVE.
 
 ### Smoke Test Validation
 
@@ -241,7 +242,7 @@ def upgrade():
 
 ### Automatic (Pre-Switch Failure)
 
-If the build, health checks, or smoke tests fail, the live containers were never touched. The deploy script stops the failed containers and exits. No action needed.
+If any step before the switch fails, the live containers were never touched. The deploy saved each role's password verifier before the convergence and puts it back, so the live color logs in as it did. The Slack message says so, or says the live color is down where putting it back failed. Otherwise no action is needed.
 
 ### Manual (Post-Switch Problem)
 

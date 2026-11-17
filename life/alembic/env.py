@@ -8,6 +8,7 @@ from sqlalchemy import pool
 import life.models
 from life.config import get_settings
 from life.database.base import Base
+from life.database.initialization import create_apscheduler_jobstore_table
 from life.models.record_change import declare_audit_trail
 
 # this is the Alembic Config object, which provides
@@ -94,6 +95,7 @@ def run_migrations_online() -> None:
             # The models describe the schema at head, so a run ending anywhere else declares nothing.
             if set(context.get_context().get_current_heads()) == set(context.script.get_heads()):
                 declare_audit_trail(connection)
+                create_apscheduler_jobstore_table(connection)
 
 
 if context.is_offline_mode():

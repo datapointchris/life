@@ -1,0 +1,17 @@
+-- psql's half of the production role convergence. It binds each password from the environment
+-- as the setting life/database/roles.sql reads, and roles.sql follows it on the same stdin, in
+-- one transaction. psql quotes each value itself through :'name', and an unset variable stops
+-- the run at a syntax error.
+\set ON_ERROR_STOP on
+-- An error's context would print the ALTER ROLE statement, password and all.
+\set SHOW_CONTEXT never
+\set VERBOSITY terse
+\getenv owner_password POSTGRES_OWNER_PASSWORD
+\getenv app_password POSTGRES_APP_PASSWORD
+\getenv superuser_password POSTGRES_SUPERUSER_PASSWORD
+\o /dev/null
+SELECT
+    set_config('life_roles.owner_password', :'owner_password', true),
+    set_config('life_roles.app_password', :'app_password', true),
+    set_config('life_roles.superuser_password', :'superuser_password', true);
+\o
