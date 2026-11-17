@@ -54,7 +54,9 @@ services:
     environment:
       - POSTGRES_DB=life
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      # The superuser's, from secrets.postgres-roles.prod.enc.env, which every `up` runs under
+      # through sops exec-env, so no app container holds it. Postgres reads it only at initdb.
+      - POSTGRES_PASSWORD=${POSTGRES_SUPERUSER_PASSWORD:-}
     ports: []
     volumes:
       - postgres_data:/var/lib/postgresql/data

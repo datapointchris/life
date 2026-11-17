@@ -55,6 +55,13 @@ COMPOSE_PROD="docker compose --project-name life-prod -f docker-compose.yml"
 
 # Blue/green deployment compose commands
 COMPOSE_INFRA="docker compose --project-name life-infra -f docker-compose.infra.yml"
+
+# The infra compose takes the Postgres superuser's password from the roles secrets
+# file, which no app container reads.
+compose_infra_up() {
+  sops exec-env secrets/secrets.postgres-roles.prod.enc.env "$COMPOSE_INFRA up -d"
+}
+
 BLUEGREEN_STATE_FILE="/var/lib/life/bluegreen-state"
 
 compose_app() {
@@ -841,7 +848,7 @@ function prod-start() {
 
   if [[ -n "$color" ]]; then
     echo "Starting ${magenta}PRODUCTION${reset} (blue/green: ${cyan}${color}${reset})"
-    $COMPOSE_INFRA up -d
+    compose_infra_up
     compose_app "$color" up -d
   else
     echo "Starting ${magenta}PRODUCTION${reset} (legacy single-compose)"
@@ -880,7 +887,7 @@ function prod-restart() {
 
   if [[ -n "$color" ]]; then
     echo "Restarting ${magenta}PRODUCTION${reset} (${cyan}${color}${reset})"
-    $COMPOSE_INFRA up -d
+    compose_infra_up
     compose_app "$color" up -d
   else
     echo "Restarting ${magenta}PRODUCTION${reset} environment"

@@ -77,6 +77,14 @@ function db-init() {
     as-database-owner "$container" python -m life.database.initialization --env "$env"
     return
   fi
+  if [[ "$env" == "production" ]]; then
+    # A production API holds only the app role's login, so the owner's password
+    # reaches this one command from the roles secrets file, as the deploy's
+    # migrations get it.
+    sops exec-env secrets/secrets.postgres-roles.prod.enc.env \
+      "docker exec -e POSTGRES_OWNER_PASSWORD $container sh -c 'POSTGRES_USERNAME=\"\$POSTGRES_DB\" POSTGRES_PASSWORD=\"\$POSTGRES_OWNER_PASSWORD\" exec python -m life.database.initialization --env production'"
+    return
+  fi
   docker exec "$container" python -m life.database.initialization --env "$env"
 }
 

@@ -25,7 +25,11 @@ generated password goes in quoted:
 printf '"%s"' "$(openssl rand -hex 32)" | sops set --value-stdin secrets/secrets.prod.enc.env '["POSTGRES_PASSWORD"]'
 ```
 
-A changed password reaches its role on the next deploy, which converges both roles.
+A changed password reaches its role on the next deploy, which converges both roles. Until
+traffic switches, the live color's new connections fail where it logs in as the changed role,
+and a deploy that fails before the switch puts the old password back. The Postgres container
+takes `POSTGRES_SUPERUSER_PASSWORD` from the roles file at initdb, through `sops exec-env`, so
+changing the app's password never recreates it.
 
 Opens in `$EDITOR`. SOPS decrypts on open, re-encrypts on save.
 

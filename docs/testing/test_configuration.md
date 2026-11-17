@@ -44,14 +44,15 @@ session starts its own container, and the values are where Docker published it:
 | ---------------------------------- | ----------------------------------------------------- |
 | `postgres.host`, `sqlalchemy.host` | the URL's host, or the container host Docker reports  |
 | `postgres.port`, `sqlalchemy.port` | the URL's port, or the port Docker picked for 5432    |
-| `postgres.username`, `.password`   | `life_app` and `POSTGRES_PASSWORD` from `testing.env` |
+| `postgres.username`, `.password`   | the app role, `POSTGRES_PASSWORD` in `testing.env`    |
 | `redis.host`, `redis.port`         | the same, for 6379                                    |
 | `redis.password`                   | the URL's, or none                                    |
 | `redis.db`                         | the URL's, or `REDIS_DB` from `tests/testing.env`     |
 
 The URL's login, or `postgres` / `postgres` in a container, is the server's superuser. The
-session uses it once, to create `life` and `life_app` from `life/database/roles.sql`. The
-migrations and the truncate log in as `life`, through `as_owner`, with `POSTGRES_OWNER_PASSWORD`.
+session uses it once, to create the owner role, named for the database, and `<database>_app`
+from `life/database/roles.sql`. The migrations and the truncate log in as the owner, through
+`as_owner`, with `POSTGRES_OWNER_PASSWORD`.
 
 A container's port is never fixed, so no two sessions collide and nothing has
 to agree with a compose file. Nothing builds an engine or a Redis client at import time, so

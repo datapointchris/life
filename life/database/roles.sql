@@ -2,7 +2,8 @@
 -- before the migrations. The owner is named for the database: it owns every object and the
 -- migrations log in as it. `<database>_app` is what the API and the scheduler log in as: it holds
 -- DML on every table and usage on every sequence, now and on what the owner creates later, and no
--- DDL. A migration narrows it further, as the audit trail's reconcile does.
+-- DDL. A migration narrows it further, as the audit trail's reconcile does, and the convergence ends
+-- by running that reconcile, so a convergence no migration follows leaves the trail read-only too.
 --
 -- The caller binds each password as a setting first: life_roles.owner_password,
 -- life_roles.app_password and, where the superuser's own changes, life_roles.superuser_password.
@@ -79,7 +80,7 @@ BEGIN
     LOOP
         EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', schema_name, app_role);
         EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM PUBLIC, %I', schema_name, app_role);
-        EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', schema_name, app_role);
+        EXECUTE format('GRANT USAGE ON ALL SEQUENCES IN SCHEMA %I TO %I', schema_name, app_role);
     END LOOP;
 
     -- A table where the app role holds any of the four is left as a migration narrowed it. Only
@@ -88,7 +89,7 @@ BEGIN
         SELECT c.oid::regclass::text
         FROM pg_class AS c
         JOIN pg_namespace AS n ON n.oid = c.relnamespace
-        WHERE c.relkind IN ('r', 'p', 'v')
+        WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
             AND n.nspname NOT IN ('pg_catalog', 'information_schema')
             AND n.nspname NOT LIKE 'pg\_%'
             AND NOT has_table_privilege(app_role, c.oid, 'SELECT, INSERT, UPDATE, DELETE')
@@ -98,7 +99,13 @@ BEGIN
 
     EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I',
                    owner_role, app_role);
-    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I GRANT USAGE, SELECT ON SEQUENCES TO %I', owner_role, app_role);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I GRANT USAGE ON SEQUENCES TO %I', owner_role, app_role);
     EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I GRANT USAGE ON SCHEMAS TO %I', owner_role, app_role);
+
+    -- The grants above give a table the app holds nothing on all four, which a restored dump's trail
+    -- is. The reconcile narrows the trail again, wherever a migration has created it.
+    IF to_regprocedure('life_audit_trail_reconcile()') IS NOT NULL THEN
+        PERFORM life_audit_trail_reconcile();
+    END IF;
 END;
 $$;

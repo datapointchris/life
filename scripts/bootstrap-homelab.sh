@@ -241,11 +241,33 @@ start_services() {
   fi
 }
 
-# The owner, life, and the app role, life_app, with their passwords from both
-# secrets files, as scripts/deploy-homelab.sh converges them on every deploy.
+# The owner, life, and the app role, life_app, as scripts/deploy-homelab.sh
+# converges them on every deploy.
 converge_database_roles() {
-  (cd "$INSTALL_DIR" && sops exec-env secrets/secrets.prod.enc.env \
-    'sops exec-env secrets/secrets.postgres-roles.prod.enc.env scripts/converge-database-roles.sh')
+  "$INSTALL_DIR/scripts/converge-database-roles.sh"
+}
+
+# The first convergence creates life, which the new database's owner and
+# pg_restore's login need. The restored database is a new one, so its owner and
+# grants converge again after. Each step returns rather than exits, because the
+# caller tests it, and set -e does not reach inside a tested function.
+restore_database() {
+  local backup_path="$1"
+
+  converge_database_roles || return 1
+
+  docker exec life-infra-postgres psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'life' AND pid <> pg_backend_pid();" 2>/dev/null || true
+  docker exec life-infra-postgres psql -U postgres -c "DROP DATABASE IF EXISTS life;" || return 1
+  docker exec life-infra-postgres psql -U postgres -c "CREATE DATABASE life OWNER life;" || return 1
+
+  # A gzipped dump is plain SQL, which pg_restore refuses.
+  if [[ "$backup_path" == *.gz ]]; then
+    gunzip -c "$backup_path" | docker exec -i life-infra-postgres psql -U postgres -d life --set ON_ERROR_STOP=1 || return 1
+  else
+    docker exec -i life-infra-postgres pg_restore -U life -d life --no-owner --exit-on-error <"$backup_path" || return 1
+  fi
+
+  converge_database_roles
 }
 
 post_start_database() {
@@ -270,22 +292,12 @@ post_start_database() {
     # Stop app services during restore
     docker stop life-prod-api life-prod-vue life-prod-scheduler 2>/dev/null || true
 
-    converge_database_roles
-
-    # Drop and recreate database
-    docker exec life-infra-postgres psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'life' AND pid <> pg_backend_pid();" 2>/dev/null || true
-    docker exec life-infra-postgres psql -U postgres -c "DROP DATABASE IF EXISTS life;"
-    docker exec life-infra-postgres psql -U postgres -c "CREATE DATABASE life OWNER life;"
-
-    # Restore. A gzipped dump is plain SQL, which pg_restore refuses.
-    if [[ "$backup_path" == *.gz ]]; then
-      gunzip -c "$backup_path" | docker exec -i life-infra-postgres psql -U postgres -d life --set ON_ERROR_STOP=1
-    else
-      docker exec -i life-infra-postgres pg_restore -U life -d life --no-owner --exit-on-error <"$backup_path"
+    # The services stay stopped on a failure, because a half-restored database
+    # is worse to serve than none.
+    if ! restore_database "$backup_path"; then
+      log_error "Restore failed. life-prod-api, life-prod-vue and life-prod-scheduler are stopped, and the database's roles may not have converged. Fix the cause, then run scripts/converge-database-roles.sh and docker start life-prod-api life-prod-vue life-prod-scheduler."
+      exit 1
     fi
-
-    # The restored database is a new one, so its owner and grants converge again.
-    converge_database_roles
 
     # Start services back up
     docker start life-prod-api life-prod-vue life-prod-scheduler

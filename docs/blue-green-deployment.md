@@ -111,7 +111,7 @@ The deploy script at `scripts/deploy-homelab.sh` runs this sequence:
 17. notify_slack()
 ```
 
-If steps 6-10 fail, the LIVE containers keep serving traffic. The deploy script cleans up the failed DEPLOY containers, sends a Slack failure notification, and exits non-zero.
+If any step before `switch_traffic()` fails, the deploy removes the DEPLOY containers, puts back any database password the convergence changed, sends a Slack failure notification and exits non-zero. Traffic stays on LIVE.
 
 ### Smoke Test Validation
 
@@ -242,7 +242,7 @@ def upgrade():
 
 ### Automatic (Pre-Switch Failure)
 
-If the build, health checks, or smoke tests fail, the live containers were never touched. The deploy script stops the failed containers and exits. No action needed.
+If any step before the switch fails, the live containers were never touched. The deploy saved each role's password verifier before the convergence and puts it back, so the live color logs in as it did. The Slack message says so, or says the live color is down where putting it back failed. Otherwise no action is needed.
 
 ### Manual (Post-Switch Problem)
 
