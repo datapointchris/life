@@ -3,8 +3,9 @@ import datetime as dt
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from life.schemas.iana_zone import IanaZone
-from life.schemas.not_null import NotNull
+from life import models
+from life.iana_zone import IanaZone
+from life.schemas.partial_update import PartialUpdate
 from life.schemas.wall_clock import WallClock
 
 
@@ -35,12 +36,14 @@ class Event(EventConfig):
     notes: str | None = None
 
 
-class EventUpdate(EventConfig):
-    name: NotNull[str] = None
-    date: NotNull[WallClock] = None
-    timezone: NotNull[IanaZone] = None
-    venue: NotNull[str] = None
+class EventUpdate(EventConfig, PartialUpdate):
+    updates = models.Event
+
+    name: str | None = None
+    date: WallClock | None = None
+    timezone: IanaZone | None = None
+    venue: str | None = None
     url: str | None = None
-    cost: NotNull[float] = None
-    attending: NotNull[bool] = None
+    cost: float | None = None
+    attending: bool | None = None
     notes: str | None = None

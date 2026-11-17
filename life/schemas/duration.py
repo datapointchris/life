@@ -3,7 +3,8 @@ import datetime as dt
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class DurationConfig(BaseModel):
@@ -22,9 +23,11 @@ class DurationNote(DurationConfig):
     content: str
 
 
-class DurationNoteUpdate(DurationConfig):
-    date: NotNull[dt.date] = None
-    content: NotNull[str] = None
+class DurationNoteUpdate(DurationConfig, PartialUpdate):
+    updates = models.DurationNote
+
+    date: dt.date | None = None
+    content: str | None = None
 
 
 class DurationCreate(DurationConfig):
@@ -45,9 +48,11 @@ class Duration(DurationConfig):
     duration_notes: list[DurationNote] = []
 
 
-class DurationUpdate(DurationConfig):
-    name: NotNull[str] = None
-    start_date: NotNull[dt.date] = None
+class DurationUpdate(DurationConfig, PartialUpdate):
+    updates = models.Duration
+
+    name: str | None = None
+    start_date: dt.date | None = None
     end_date: dt.date | None = None
     notes: str | None = None
     color: str | None = None

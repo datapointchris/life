@@ -5,7 +5,8 @@ from pydantic import ConfigDict
 from pydantic import field_validator
 from pydantic import model_validator
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class BookConfig(BaseModel):
@@ -72,10 +73,12 @@ class Book(BookConfig):
     review: str | None = None
 
 
-class BookUpdate(BookConfig):
+class BookUpdate(BookConfig, PartialUpdate):
+    updates = models.Book
+
     isbn: str | None = None
-    title: NotNull[str] = None
-    author: NotNull[str] = None
+    title: str | None = None
+    author: str | None = None
     tags: list[str] = []
     goodreads_url: str | None = None
     priority: int | None = None
@@ -88,8 +91,8 @@ class BookUpdate(BookConfig):
     rating: int | None = None
     location: str | None = None
     notes: str | None = None
-    ownership: NotNull[str] = None
-    progress: NotNull[str] = None
+    ownership: str | None = None
+    progress: str | None = None
     reject_reason: str | None = None
     review: str | None = None
 

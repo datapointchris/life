@@ -20,7 +20,7 @@ from werkzeug.security import check_password_hash
 from werkzeug.security import generate_password_hash
 
 from life.database.base import Base
-from life.schemas.iana_zone import refuse_unknown_zone
+from life.iana_zone import refuse_unknown_zone
 
 MutableJSONB = mutable_json_type(dbtype=JSONB, nested=True)
 

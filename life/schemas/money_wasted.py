@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import field_validator
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class MoneyWastedConfig(BaseModel):
@@ -35,11 +36,13 @@ class MoneyWasted(MoneyWastedConfig):
     notes: str | None
 
 
-class MoneyWastedUpdate(MoneyWastedConfig):
-    item: NotNull[str] = None
-    amount: NotNull[float] = None
+class MoneyWastedUpdate(MoneyWastedConfig, PartialUpdate):
+    updates = models.MoneyWasted
+
+    item: str | None = None
+    amount: float | None = None
     date_purchased: dt.date | None = None
-    date_wasted: NotNull[dt.date] = None
+    date_wasted: dt.date | None = None
     notes: str | None = None
 
     @field_validator('date_purchased')

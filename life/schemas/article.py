@@ -4,8 +4,9 @@ from pydantic import AwareDatetime
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from life.schemas.not_null import NotNull
+from life import models
 from life.schemas.one_line_text import OneLineText
+from life.schemas.partial_update import PartialUpdate
 
 
 class ArticleConfig(BaseModel):
@@ -56,16 +57,18 @@ class Article(ArticleConfig):
     review_days: int | None = None
 
 
-class ArticleUpdate(ArticleConfig):
-    title: NotNull[OneLineText] = None
+class ArticleUpdate(ArticleConfig, PartialUpdate):
+    updates = models.Article
+
+    title: OneLineText | None = None
     tags: list[str] = []
-    summary: NotNull[str] = None
+    summary: str | None = None
     notes: str | None = None
-    is_favorite: NotNull[bool] = None
-    is_current: NotNull[bool] = None
-    is_archived: NotNull[bool] = None
+    is_favorite: bool | None = None
+    is_current: bool | None = None
+    is_archived: bool | None = None
     last_read_date: AwareDatetime | None = None
-    read_count: NotNull[int] = None
+    read_count: int | None = None
     review_days: int | None = None
 
 

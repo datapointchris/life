@@ -1,8 +1,9 @@
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
+from life import models
 from life.schemas.habitcategory import HabitCategory
-from life.schemas.not_null import NotNull
+from life.schemas.partial_update import PartialUpdate
 
 
 class HabitConfig(BaseModel):
@@ -23,7 +24,9 @@ class Habit(HabitConfig):
     is_current: bool
 
 
-class HabitUpdate(HabitConfig):
-    name: NotNull[str] = None
-    category_id: NotNull[int] = None
-    is_current: NotNull[bool] = None
+class HabitUpdate(HabitConfig, PartialUpdate):
+    updates = models.Habit
+
+    name: str | None = None
+    category_id: int | None = None
+    is_current: bool | None = None

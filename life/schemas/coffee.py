@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import model_validator
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class CoffeeShopConfig(BaseModel):
@@ -48,8 +49,10 @@ class CoffeeShop(CoffeeShopConfig):
     created_at: dt.datetime
 
 
-class CoffeeShopUpdate(CoffeeShopConfig):
-    name: NotNull[str] = None
+class CoffeeShopUpdate(CoffeeShopConfig, PartialUpdate):
+    updates = models.CoffeeShop
+
+    name: str | None = None
     address: str | None = None
     city: str | None = None
     state: str | None = None
@@ -118,8 +121,10 @@ class CoffeeBean(CoffeeBeanConfig):
     created_at: dt.datetime
 
 
-class CoffeeBeanUpdate(CoffeeBeanConfig):
-    name: NotNull[str] = None
+class CoffeeBeanUpdate(CoffeeBeanConfig, PartialUpdate):
+    updates = models.CoffeeBean
+
+    name: str | None = None
     roaster: str | None = None
     origin: str | None = None
     process: str | None = None

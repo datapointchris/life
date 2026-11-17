@@ -5,8 +5,9 @@ from pydantic import ConfigDict
 from pydantic import PositiveInt
 from pydantic import field_validator
 
+from life import models
 from life.schemas.habitcompleted import EASTERNMOST_UTC_OFFSET
-from life.schemas.not_null import NotNull
+from life.schemas.partial_update import PartialUpdate
 
 
 class ChecklistConfig(BaseModel):
@@ -18,9 +19,11 @@ class HabitChecklistItemCreate(ChecklistConfig):
     daily_target: PositiveInt
 
 
-class HabitChecklistItemUpdate(ChecklistConfig):
-    name: NotNull[str] = None
-    daily_target: NotNull[PositiveInt] = None
+class HabitChecklistItemUpdate(ChecklistConfig, PartialUpdate):
+    updates = models.HabitChecklistItem
+
+    name: str | None = None
+    daily_target: PositiveInt | None = None
 
 
 class HabitChecklistItem(ChecklistConfig):

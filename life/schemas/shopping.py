@@ -7,7 +7,8 @@ from pydantic import ConfigDict
 from pydantic import StringConstraints
 from pydantic import model_validator
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 # A section or an item answers to its UUID or its name. Names are unique without
 # regard to case, so a name is as good a handle as a number would be.
@@ -35,8 +36,10 @@ class ShoppingSectionCreate(ShoppingConfig):
     name: ShoppingName
 
 
-class ShoppingSectionUpdate(ShoppingConfig):
-    name: NotNull[ShoppingName] = None
+class ShoppingSectionUpdate(ShoppingConfig, PartialUpdate):
+    updates = models.ShoppingSection
+
+    name: ShoppingName | None = None
 
 
 class ShoppingSectionRankMove(ShoppingConfig):
@@ -81,13 +84,15 @@ class ShoppingItemCreate(ShoppingConfig):
     section: ShoppingSectionRef | None = None
 
 
-class ShoppingItemUpdate(ShoppingConfig):
+class ShoppingItemUpdate(ShoppingConfig, PartialUpdate):
     """`section` null moves the item to Unsorted. `is_needed` false takes it off the list without a purchase."""
 
-    name: NotNull[ShoppingName] = None
+    updates = models.ShoppingItem
+
+    name: ShoppingName | None = None
     note: str | None = None
     section: ShoppingSectionRef | None = None
-    is_needed: NotNull[bool] = None
+    is_needed: bool | None = None
 
 
 class ShoppingItemRankMove(ShoppingConfig):

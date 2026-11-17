@@ -15,8 +15,8 @@ from fastapi import Query
 from life import models
 from life.api.endpoints.auth import get_current_user_or_scoped_client
 from life.api.oidc_auth import ScopedClient
+from life.iana_zone import IanaZone
 from life.models.user import CALENDAR_FALLBACK_ZONE
-from life.schemas.iana_zone import IanaZone
 
 
 def request_zone(

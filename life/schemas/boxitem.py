@@ -1,7 +1,8 @@
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class BoxItemConfig(BaseModel):
@@ -36,11 +37,13 @@ class BoxItem(BoxItemConfig):
         return self.box_id is None
 
 
-class BoxItemUpdate(BoxItemConfig):
+class BoxItemUpdate(BoxItemConfig, PartialUpdate):
     """Pydantic model for updating a box item."""
 
+    updates = models.BoxItem
+
     box_id: int | None = None
-    name: NotNull[str] = None
-    essential: NotNull[bool] = None
-    warm: NotNull[bool] = None
-    liquid: NotNull[bool] = None
+    name: str | None = None
+    essential: bool | None = None
+    warm: bool | None = None
+    liquid: bool | None = None

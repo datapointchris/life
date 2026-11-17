@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 WindowDays = Annotated[int, Field(ge=1)]
 
@@ -38,14 +39,16 @@ class Task(TaskConfig):
     drop_reason: str | None = None
 
 
-class TaskUpdate(TaskConfig):
-    name: NotNull[str] = None
+class TaskUpdate(TaskConfig, PartialUpdate):
+    updates = models.Task
+
+    name: str | None = None
     notes: str | None = None
-    category: NotNull[str] = None
-    rank_at: NotNull[AwareDatetime] = None
-    window_days: NotNull[WindowDays] = None
-    pinned: NotNull[bool] = None
-    add_date: NotNull[AwareDatetime] = None
+    category: str | None = None
+    rank_at: AwareDatetime | None = None
+    window_days: WindowDays | None = None
+    pinned: bool | None = None
+    add_date: AwareDatetime | None = None
     complete_date: AwareDatetime | None = None
     drop_date: AwareDatetime | None = None
     drop_reason: str | None = None
@@ -80,5 +83,7 @@ class TaskCategory(TaskConfig):
     window_days: int
 
 
-class TaskCategoryUpdate(TaskConfig):
-    window_days: NotNull[WindowDays] = None
+class TaskCategoryUpdate(TaskConfig, PartialUpdate):
+    updates = models.TaskCategory
+
+    window_days: WindowDays | None = None

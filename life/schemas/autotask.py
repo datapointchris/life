@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 from life.schemas.task import WindowDays
 
 
@@ -38,11 +39,13 @@ class AutoTask(AutoTaskConfig):
     run_count: int
 
 
-class AutoTaskUpdate(AutoTaskConfig):
-    name: NotNull[str] = None
-    category: NotNull[str] = None
+class AutoTaskUpdate(AutoTaskConfig, PartialUpdate):
+    updates = models.AutoTask
+
+    name: str | None = None
+    category: str | None = None
     notes: str | None = None
-    frequency: NotNull[str] = None
+    frequency: str | None = None
     window_days: WindowDays | None = None
-    anchor: NotNull[str] = None
-    max_concurrent: NotNull[int] = None
+    anchor: str | None = None
+    max_concurrent: int | None = None

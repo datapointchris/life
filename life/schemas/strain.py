@@ -6,15 +6,13 @@ from pydantic import Field
 from pydantic import field_validator
 from pydantic import model_validator
 
+from life import models
+from life.schemas.partial_update import PartialUpdate
+
 # The four array columns are NOT NULL DEFAULT '{}', so a null arriving on the
 # wire would reach the column as None and fail the insert. Normalizing here
 # means a client may omit a list, send null, or send [] and get the same row.
 ARRAY_FIELDS = ('effects', 'flavors', 'terpenes', 'tags')
-
-# The columns a PATCH may leave alone but never empty. Both are NOT NULL, and a
-# blank reaching `setattr` fails at the column as a 500 rather than as a message
-# naming the field.
-REQUIRED_COLUMNS = ('name', 'status')
 
 
 def blank(value) -> bool:
@@ -76,7 +74,9 @@ class Strain(StrainBase):
     updated_at: dt.datetime
 
 
-class StrainUpdate(StrainConfig):
+class StrainUpdate(StrainConfig, PartialUpdate):
+    updates = models.Strain
+
     name: str | None = None
     breeder: str | None = None
     lineage: str | None = None
@@ -97,16 +97,18 @@ class StrainUpdate(StrainConfig):
     @model_validator(mode='before')
     @classmethod
     def empty_field_to_none(cls, data):
-        """Blank a nullable column with `''` or null; refuse to blank a required one.
+        """Blank a nullable column with `''` or null; refuse to blank a NOT NULL one other than an array.
 
         The refusal runs before the conversion, because the conversion is what
         makes the two indistinguishable: `{"name": ""}` and `{"name": null}`
         both become None, and `exclude_unset=True` keeps the key because the
-        caller named it. Omitting the key is how a field is left alone.
+        caller named it. Omitting the key is how a field is left alone. A
+        blank reaching `setattr` would fail at the column as a 500 rather than
+        as a message naming the field.
         """
         if not isinstance(data, dict):
             return data
-        for field in REQUIRED_COLUMNS:
+        for field in cls.not_null.difference(ARRAY_FIELDS):
             if field in data and blank(data[field]):
                 raise ValueError(f'{field} cannot be blank — omit it to leave it unchanged')
         return {k: (None if v == '' else v) for k, v in data.items()}

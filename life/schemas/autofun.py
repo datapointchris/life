@@ -3,7 +3,8 @@ import datetime as dt
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class AutoFunConfig(BaseModel):
@@ -24,6 +25,8 @@ class AutoFun(AutoFunConfig):
     added_date: dt.datetime
 
 
-class AutoFunUpdate(AutoFunConfig):
-    name: NotNull[str] = None
+class AutoFunUpdate(AutoFunConfig, PartialUpdate):
+    updates = models.AutoFun
+
+    name: str | None = None
     notes: str | None = None

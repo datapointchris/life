@@ -3,7 +3,8 @@ import datetime as dt
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class CountdownConfig(BaseModel):
@@ -23,7 +24,9 @@ class Countdown(CountdownConfig):
     due_date: dt.date
 
 
-class CountdownUpdate(CountdownConfig):
-    name: NotNull[str] = None
+class CountdownUpdate(CountdownConfig, PartialUpdate):
+    updates = models.Countdown
+
+    name: str | None = None
     notes: str | None = None
-    due_date: NotNull[dt.date] = None
+    due_date: dt.date | None = None

@@ -4,7 +4,8 @@ from pydantic import AwareDatetime
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class PatternConfig(BaseModel):
@@ -24,6 +25,8 @@ class Pattern(PatternConfig):
     recorded_at: dt.datetime
 
 
-class PatternUpdate(PatternConfig):
-    message: NotNull[str] = None
-    recorded_at: NotNull[AwareDatetime] = None
+class PatternUpdate(PatternConfig, PartialUpdate):
+    updates = models.Pattern
+
+    message: str | None = None
+    recorded_at: AwareDatetime | None = None

@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import field_validator
 
-from life.schemas.not_null import NotNull
+from life import models
+from life.schemas.partial_update import PartialUpdate
 
 
 class UserConfig(BaseModel):
@@ -37,10 +38,12 @@ class User(UserConfig):
     preferences: Any
 
 
-class UserUpdate(UserConfig):
-    name: NotNull[str] = None
-    email: NotNull[str] = None
-    password: NotNull[str] = None
-    is_admin: NotNull[bool] = None
-    last_login: NotNull[AwareDatetime] = None
-    preferences: NotNull[Any] = None
+class UserUpdate(UserConfig, PartialUpdate):
+    updates = models.User
+
+    name: str | None = None
+    email: str | None = None
+    password: str | None = None
+    is_admin: bool | None = None
+    last_login: AwareDatetime | None = None
+    preferences: Any | None = None
