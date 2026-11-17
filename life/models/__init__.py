@@ -34,6 +34,7 @@ from life.models.recipe import RecipeDifficulty
 from life.models.recipe import RecipeIngredient
 from life.models.recipe import RecipeMealType
 from life.models.recipe import RecipeUnit
+from life.models.record_change import AuditTrailTable
 from life.models.record_change import RecordChange
 from life.models.scheduler_job_run import SchedulerJobRun
 from life.models.shopping import ShoppingItem
@@ -52,6 +53,7 @@ from life.models.user import User
 __all__ = [
     'AdminSettings',
     'Article',
+    'AuditTrailTable',
     'AutoFun',
     'AutoFunActiveTask',
     'AutoTask',

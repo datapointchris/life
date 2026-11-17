@@ -29,6 +29,7 @@ from life.config import get_settings
 from life.database.base import Base
 from life.database.session import create_session
 from life.database.session import get_db_engine
+from life.models import AuditTrailTable
 from life.models import User
 from life.models.autotask import AUTOTASK_ANCHORS
 from life.models.recipe import COOKING_TECHNIQUE_CATEGORIES
@@ -179,9 +180,12 @@ def insert_admin_settings(settings) -> None:
 
 
 def truncate_all_tables(settings) -> None:
-    """Truncate all data tables, preserving schema and alembic state."""
+    """Truncate all data tables, preserving schema and alembic state.
+
+    `life_audit_trail_tables` declares what the audit trail records, so it is schema rather than data.
+    """
     engine = get_db_engine(settings)
-    tables = [t for t in Base.metadata.sorted_tables if t.name != 'alembic_version']
+    tables = [t for t in Base.metadata.sorted_tables if t is not AuditTrailTable.__table__]
     table_names = ', '.join(f'"{t.schema}"."{t.name}"' if t.schema else f'"{t.name}"' for t in tables)
 
     logger.info('truncating_all_tables')

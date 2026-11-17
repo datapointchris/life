@@ -4,12 +4,11 @@ from alembic import context
 from sqlalchemy import create_engine
 from sqlalchemy import pool
 
-from life.config import get_settings
-from life.database.base import Base
-
 # Importing the package registers every model on Base.metadata.
 import life.models
-
+from life.config import get_settings
+from life.database.base import Base
+from life.models.record_change import declare_audit_trail
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -30,9 +29,7 @@ EXCLUDED_TABLES = {'apscheduler_jobs'}
 
 
 def include_name(name, type_, parent_names):
-    if type_ == 'table' and name in EXCLUDED_TABLES:
-        return False
-    return True
+    return not (type_ == 'table' and name in EXCLUDED_TABLES)
 
 
 # other values from the config, defined by the needs of env.py,
@@ -94,6 +91,9 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
+            # The models describe the schema at head, so a run ending anywhere else declares nothing.
+            if set(context.get_context().get_current_heads()) == set(context.script.get_heads()):
+                declare_audit_trail(connection)
 
 
 if context.is_offline_mode():

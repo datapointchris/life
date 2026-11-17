@@ -12,8 +12,8 @@ the ORM, a Core `update()` or `delete()`, raw SQL, and an `ON DELETE SET NULL` o
 Postgres applies itself. An application-side listener sees only what the ORM flushes, and a
 foreign-key action changes rows the ORM never loaded.
 
-A table's trigger is created in its migration. `test_every_table_is_audited_but_what_opts_out`
-fails on a mapped table without one, and gives the statement to add.
+A table's trigger is attached at the end of the migration run that creates the table, from its
+declaration below, so no migration writes one.
 
 A dropped table's entries stay. A drop fires no row trigger, so the trail records nothing for it,
 and `record-changes` still reads the table's history by name.
@@ -44,8 +44,18 @@ that user. Only a service client is told apart from the person.
 ## A secret column opts out of the trail
 
 Every column is recorded unless it opts out. A column opts out with
-`info={'record_changes': False}`, and its table's trigger names it as an argument, which the
-trigger strips from the row. A table opts out with the same key in its `__table_args__` info and
-has no trigger. `users.password` opts out. So do `scheduler_job_runs`, which is itself a record of
-what ran, and the trail itself. The same test fails on a column named like a credential that has
-not opted out.
+`info={'record_changes': False}`, and a table opts out with the same key in its `__table_args__`
+info. `users.password` opts out. So do `scheduler_job_runs`, which is itself a record of what ran,
+and the trail itself. `apscheduler_jobs`, which APScheduler creates and no model describes, opts
+out through a row its migration wrote.
+
+The declarations live in `life_audit_trail_tables`, one row per table, which the trigger reads to
+know which columns to strip. Once a migration run reaches head, `declare_audit_trail` writes each
+model's row, and `life_audit_trail_reconcile()` attaches the trigger to every table recorded and
+drops it from every table that opts out. A table with no row is recorded whole, so a new table is
+audited without its migration doing anything. The reconcile refuses the run where a recorded table
+records a column named like a credential. `SELECT * FROM life_audit_trail_targets` shows each
+table's declaration beside whether its trigger is attached.
+
+The trigger function runs as its owner. A role named for the database with `_app` after it, where
+one exists, reads the trail and cannot write it.
