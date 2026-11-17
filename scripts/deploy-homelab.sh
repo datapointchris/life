@@ -337,13 +337,36 @@ wait_for_healthy() {
   exit 1
 }
 
+# The API and the scheduler log in as life_app, which this creates on its first
+# run, so it runs before the new color starts. It also sets the owner's and the
+# superuser's passwords from secrets/secrets.postgres-roles.prod.enc.env, which
+# no container is handed.
+converge_database_roles() {
+  FAILURE_STEP="database_roles"
+  log_info "database_roles_started" | tee -a "$LOG_FILE"
+  cd "$INSTALL_DIR"
+
+  local roles_output
+  if roles_output=$(sops exec-env secrets/secrets.prod.enc.env \
+    'sops exec-env secrets/secrets.postgres-roles.prod.enc.env scripts/converge-database-roles.sh' 2>&1); then
+    log_info "database_roles_completed" | tee -a "$LOG_FILE"
+  else
+    FAILURE_OUTPUT="$roles_output"
+    log_error "database_roles_failed" "output" "$roles_output" | tee -a "$LOG_FILE"
+    exit 1
+  fi
+}
+
+# The migrations log in as life, the database's owner, whose password the
+# serving containers never hold. It reaches this one command's environment.
 run_migrations() {
   FAILURE_STEP="migrations"
   log_info "migrations_started" "color" "$DEPLOY_COLOR" | tee -a "$LOG_FILE"
   cd "$INSTALL_DIR"
 
   local migration_output
-  if migration_output=$(docker exec -w /app/life "life-${DEPLOY_COLOR}-api" alembic upgrade head 2>&1); then
+  if migration_output=$(sops exec-env secrets/secrets.postgres-roles.prod.enc.env \
+    "POSTGRES_USERNAME=life POSTGRES_PASSWORD=\"\$POSTGRES_OWNER_PASSWORD\" docker exec -w /app/life -e POSTGRES_USERNAME -e POSTGRES_PASSWORD life-${DEPLOY_COLOR}-api alembic upgrade head" 2>&1); then
     log_info "migrations_completed" "color" "$DEPLOY_COLOR" "output" "$migration_output" | tee -a "$LOG_FILE"
   else
     FAILURE_OUTPUT="$migration_output"
@@ -484,6 +507,7 @@ main() {
 
   determine_colors
   ensure_infra_running
+  converge_database_roles
   pull_new_images
   start_new_containers
   wait_for_healthy

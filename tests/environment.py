@@ -7,6 +7,7 @@ tables. testcontainers' reaper removes those when the session ends, however it
 ends.
 """
 
+import copy
 import logging
 import os
 from pathlib import Path
@@ -21,7 +22,11 @@ from testcontainers.core.config import testcontainers_config
 from testcontainers.core.container import DockerContainer
 
 from life.config import Settings
+from life.config import postgres_url
 from life.database.initialization import full_initialization
+from life.database.roles import app_role
+from life.database.roles import converge_database_roles
+from life.database.roles import owner_role
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,19 @@ POSTGRES_USER = 'postgres'
 POSTGRES_PASSWORD = 'postgres'
 POSTGRES_DB = 'life'
 POSTGRES_DATA = '/var/lib/postgresql/data'
+OWNER_PASSWORD = os.environ['POSTGRES_OWNER_PASSWORD']
+APP_PASSWORD = os.environ['POSTGRES_PASSWORD']
+
+
+def as_owner(settings: Settings) -> Settings:
+    """A copy of `settings` logged in as the database's owner, for the migrations and for emptying tables."""
+    owner = copy.copy(settings)
+    owner.postgres = copy.copy(settings.postgres)
+    owner.sqlalchemy = copy.copy(settings.sqlalchemy)
+    for database in (owner.postgres, owner.sqlalchemy):
+        database.username = owner_role(database.database)
+        database.password = OWNER_PASSWORD
+    return owner
 
 
 def production_image(service: str) -> str:
@@ -45,7 +63,9 @@ def production_image(service: str) -> str:
 class PrivateServices:
     """Points `settings` at this session's Postgres and Redis.
 
-    A container is started for whichever one TEST_DATABASE_URL or TEST_REDIS_URL does not name.
+    A container is started for whichever one TEST_DATABASE_URL or TEST_REDIS_URL does not name. The
+    database URL logs in as the server's superuser, which only creates the owner and app roles.
+    The migrations run as the owner, and `settings` logs in as the app role, as production does.
     """
 
     def __init__(self, settings: Settings):
@@ -69,19 +89,25 @@ class PrivateServices:
         postgres = urlsplit(os.environ.get('TEST_DATABASE_URL') or self.start_postgres())
         assert postgres.hostname is not None and postgres.port is not None, 'the database URL names a host and a port'
         assert redis.hostname is not None and redis.port is not None, 'the Redis URL names a host and a port'
+        database_name = postgres.path.lstrip('/')
+        superuser = unquote(postgres.username or '')
+        superuser_password = unquote(postgres.password or '')
+        converge_database_roles(
+            postgres_url(superuser, superuser_password, postgres.hostname, postgres.port, database_name), OWNER_PASSWORD, APP_PASSWORD
+        )
         for database in (self.settings.postgres, self.settings.sqlalchemy):
             database.host = postgres.hostname
             database.port = postgres.port
-            database.username = unquote(postgres.username or '')
-            database.password = unquote(postgres.password or '')
-            database.database = postgres.path.lstrip('/')
+            database.username = app_role(database_name)
+            database.password = APP_PASSWORD
+            database.database = database_name
         self.settings.redis.host = redis.hostname
         self.settings.redis.port = redis.port
         self.settings.redis.password = unquote(redis.password or '')
         if redis.path.strip('/'):
             self.settings.redis.db = int(redis.path.strip('/'))
         logger.info(f'session services: postgres {postgres.hostname}:{postgres.port}, redis {redis.hostname}:{redis.port}')
-        full_initialization(self.settings)
+        full_initialization(as_owner(self.settings))
 
     def start_postgres(self) -> str:
         """Start this session's own Postgres and return its URL."""

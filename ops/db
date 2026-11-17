@@ -70,7 +70,22 @@ function db-init() {
   local container="${prefix}-api"
 
   echo "${blue}Initializing ${env} database via ${container}...${reset}"
+  if [[ "$env" == "testing" ]]; then
+    # The test stack's API logs in as life_app, so the roles come first, and
+    # the migrations run as the database's owner.
+    docker exec "$container" python -m life.database.roles || return 1
+    as-database-owner "$container" python -m life.database.initialization --env "$env"
+    return
+  fi
   docker exec "$container" python -m life.database.initialization --env "$env"
+}
+
+# Runs a command in a test stack's container logged in as the database's owner,
+# whose role is named for the database, with the password the container holds.
+function as-database-owner() {
+  local container="$1"
+  shift
+  docker exec "$container" sh -c 'POSTGRES_USERNAME="$POSTGRES_DB" POSTGRES_PASSWORD="$POSTGRES_OWNER_PASSWORD" exec "$@"' sh "$@"
 }
 
 function db-reset() {
@@ -84,7 +99,7 @@ function db-reset() {
 
   if [[ "$env" == "testing" ]]; then
     echo "${blue}Resetting testing database in ${LIFE_TEST_PROJECT}...${reset}"
-    docker exec "${LIFE_TEST_PROJECT}-api" python -m life.database.reset_database
+    as-database-owner "${LIFE_TEST_PROJECT}-api" python -m life.database.reset_database
     return
   fi
 

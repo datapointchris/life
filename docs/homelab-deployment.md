@@ -197,7 +197,10 @@ Once tunnel is configured:
 
 Production settings live in `secrets/secrets.prod.enc.env`, encrypted with SOPS and age.
 The deploy pulls `main`, then decrypts that file to `.env`.
-The app containers read `.env` through `env_file`.
+The app containers read `.env` through `env_file`, and log in to Postgres as `life_app`.
+`secrets/secrets.postgres-roles.prod.enc.env` holds the passwords of `life`, the owner the
+migrations log in as, and of `postgres`, the superuser. It is never decrypted to a file:
+`sops exec-env` hands it to the role convergence and the migration command alone.
 `lifeops prod` commands decrypt it into their own environment instead.
 
 To change a setting, run `sops secrets/secrets.prod.enc.env`, then commit and push.
@@ -246,15 +249,12 @@ docker logs life-prod-traefik
 
 ### Database Role Does Not Exist
 
-If you see `FATAL: role "life" does not exist`:
+If you see `FATAL: role "life_app" does not exist` or `role "life" does not exist`, converge both
+roles the way every deploy does, from `/srv/life`:
 
 ```bash
-# Create the role (get password from decrypted .env)
-PG_PASS=$(grep '^POSTGRES_PASSWORD=' /srv/life/.env | cut -d= -f2- | tr -d '"')
-
-docker exec life-infra-postgres psql -U postgres -c "CREATE ROLE life WITH LOGIN PASSWORD '$PG_PASS';"
-docker exec life-infra-postgres psql -U postgres -c "ALTER ROLE life CREATEDB;"
-docker exec life-infra-postgres psql -U postgres -c "ALTER DATABASE life OWNER TO life;"
+sops exec-env secrets/secrets.prod.enc.env \
+  'sops exec-env secrets/secrets.postgres-roles.prod.enc.env scripts/converge-database-roles.sh'
 ```
 
 ### Database Restore from Backup

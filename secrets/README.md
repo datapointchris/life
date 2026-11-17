@@ -13,6 +13,20 @@ Encrypted environment files managed by [SOPS](https://github.com/getsops/sops) +
 sops secrets/secrets.prod.enc.env
 ```
 
+`secrets.prod.enc.env` is what the app containers read, as `.env`. Its `POSTGRES_USERNAME` is
+`life_app`. `secrets.postgres-roles.prod.enc.env` holds `POSTGRES_OWNER_PASSWORD` and
+`POSTGRES_SUPERUSER_PASSWORD`, which no container reads: the deploy hands them to the role
+convergence and the migration command through `sops exec-env`.
+
+Set a value without printing it or putting it on a command line. `--value-stdin` takes JSON, so a
+generated password goes in quoted:
+
+```bash
+printf '"%s"' "$(openssl rand -hex 32)" | sops set --value-stdin secrets/secrets.prod.enc.env '["POSTGRES_PASSWORD"]'
+```
+
+A changed password reaches its role on the next deploy, which converges both roles.
+
 Opens in `$EDITOR`. SOPS decrypts on open, re-encrypts on save.
 
 ## Decrypt to stdout

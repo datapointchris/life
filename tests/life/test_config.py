@@ -42,9 +42,11 @@ def test_testing_without_postgres_host_refuses_to_load(monkeypatch: pytest.Monke
 
 
 def test_private_services_point_settings_at_the_named_servers(monkeypatch: pytest.MonkeyPatch):
-    """TEST_DATABASE_URL and TEST_REDIS_URL replace the containers, credentials and database included."""
+    """TEST_DATABASE_URL's login sets up the roles, and the settings log in as the app role on its server."""
     monkeypatch.setenv('TEST_DATABASE_URL', 'postgresql://ci%40user:p%2Fss@db.internal:6543/life_ci')
     monkeypatch.setenv('TEST_REDIS_URL', 'redis://:r%40dis@cache.internal:6380/3')
+    converged: list[str] = []
+    monkeypatch.setattr(environment, 'converge_database_roles', lambda uri, owner, app: converged.append(uri))
     initialized: list[Settings] = []
     monkeypatch.setattr(environment, 'full_initialization', initialized.append)
     settings = Settings()
@@ -52,11 +54,18 @@ def test_private_services_point_settings_at_the_named_servers(monkeypatch: pytes
 
     services.start()
 
+    [superuser] = [make_url(uri) for uri in converged]
+    assert (superuser.host, superuser.port, superuser.username, superuser.password, superuser.database) == (
+        'db.internal',
+        6543,
+        'ci@user',
+        'p/ss',
+        'life_ci',
+    )
     for database in (settings.postgres, settings.sqlalchemy):
         named = (database.host, database.port, database.username, database.password, database.database)
-        assert named == ('db.internal', 6543, 'ci@user', 'p/ss', 'life_ci')
-        url = make_url(database.db_uri)
-        assert (url.host, url.username, url.password) == ('db.internal', 'ci@user', 'p/ss')
+        assert named == ('db.internal', 6543, 'life_ci_app', environment.APP_PASSWORD, 'life_ci')
     assert (settings.redis.host, settings.redis.port, settings.redis.password, settings.redis.db) == ('cache.internal', 6380, 'r@dis', 3)
     assert services.started == []
-    assert initialized == [settings]
+    [owner] = initialized
+    assert (owner.sqlalchemy.username, owner.sqlalchemy.password) == ('life_ci', environment.OWNER_PASSWORD)

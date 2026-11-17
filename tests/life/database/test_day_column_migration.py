@@ -14,13 +14,19 @@ import datetime as dt
 import pytest
 import sqlalchemy as sa
 
+from life.database.session import get_db_engine
+from tests.environment import as_owner
+from tests.utils.database import test_settings
+
 UPGRADE = "(value AT TIME ZONE 'UTC')::date"
 DOWNGRADE = "value::timestamp AT TIME ZONE 'UTC'"
 
 
 @pytest.fixture
-def conn(factory_session):
-    return factory_session.connection()
+def conn():
+    """The owner's connection, because the app role holds no TEMPORARY on the database."""
+    with get_db_engine(as_owner(test_settings)).connect() as connection, connection.begin():
+        yield connection
 
 
 def stored_day(conn, session_zone: str, stored: str) -> dt.date:

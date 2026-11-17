@@ -241,21 +241,22 @@ start_services() {
   fi
 }
 
+# The owner, life, and the app role, life_app, with their passwords from both
+# secrets files, as scripts/deploy-homelab.sh converges them on every deploy.
+converge_database_roles() {
+  (cd "$INSTALL_DIR" && sops exec-env secrets/secrets.prod.enc.env \
+    'sops exec-env secrets/secrets.postgres-roles.prod.enc.env scripts/converge-database-roles.sh')
+}
+
 post_start_database() {
   if [[ -f /tmp/life_db_init ]]; then
     log_info "Initializing fresh database..."
     # Wait for postgres to be ready
     sleep 10
 
-    # Create role and database
-    local pg_password
-    pg_password=$(grep '^POSTGRES_PASSWORD=' "$INSTALL_DIR/.env" | cut -d= -f2- | tr -d '"')
+    converge_database_roles
 
-    docker exec life-infra-postgres psql -U postgres -c "CREATE ROLE life WITH LOGIN PASSWORD '$pg_password';"
-    docker exec life-infra-postgres psql -U postgres -c "ALTER ROLE life CREATEDB;"
-    docker exec life-infra-postgres psql -U postgres -c "ALTER DATABASE life OWNER TO life;"
-
-    log_success "Database role created"
+    log_success "Database roles created"
     rm /tmp/life_db_init
 
   elif [[ -f /tmp/life_db_restore ]]; then
@@ -269,12 +270,7 @@ post_start_database() {
     # Stop app services during restore
     docker stop life-prod-api life-prod-vue life-prod-scheduler 2>/dev/null || true
 
-    # Create role if needed
-    local pg_password
-    pg_password=$(grep '^POSTGRES_PASSWORD=' "$INSTALL_DIR/.env" | cut -d= -f2- | tr -d '"')
-
-    docker exec life-infra-postgres psql -U postgres -c "CREATE ROLE life WITH LOGIN PASSWORD '$pg_password';" 2>/dev/null || true
-    docker exec life-infra-postgres psql -U postgres -c "ALTER ROLE life CREATEDB;" 2>/dev/null || true
+    converge_database_roles
 
     # Drop and recreate database
     docker exec life-infra-postgres psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'life' AND pid <> pg_backend_pid();" 2>/dev/null || true
@@ -287,6 +283,9 @@ post_start_database() {
     else
       docker exec -i life-infra-postgres pg_restore -U life -d life --no-owner --exit-on-error <"$backup_path"
     fi
+
+    # The restored database is a new one, so its owner and grants converge again.
+    converge_database_roles
 
     # Start services back up
     docker start life-prod-api life-prod-vue life-prod-scheduler

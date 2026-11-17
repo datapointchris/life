@@ -92,6 +92,7 @@ from life.config import Settings
 from life.config import get_settings
 from life.database.session import create_session
 from life.database.session import get_db_engine
+from tests.environment import as_owner
 
 ModelType = TypeVar('ModelType', bound=BaseModel)
 logger = logging.getLogger(__name__)
@@ -361,7 +362,9 @@ def delete_test_data(*datasets):
                 table_name = table_model.__table__.name
 
             if 'users' not in table:
-                session.execute(text(f'ALTER SEQUENCE {table_name}_id_seq RESTART WITH 1'))
+                with create_session(as_owner(test_settings)) as owner_session:
+                    owner_session.execute(text(f'ALTER SEQUENCE {table_name}_id_seq RESTART WITH 1'))
+                    owner_session.commit()
                 logger.info(f'reset sequence for {table_name}')
 
         session.commit()
