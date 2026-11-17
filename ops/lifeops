@@ -653,8 +653,25 @@ function test-usage() {
   echo "and Playwright's traces and screenshots in ${cyan}frontend/test-results/${reset}."
 }
 
+# The e2e suite drives app.test.localhost through the stack's Traefik, which
+# will not start without a cert for that name. A fresh clone has none, so the
+# stack makes a self-signed one before it starts.
+function testing-cert-ensure() {
+  local certs="$LIFE_HOME/deploy-containers/traefik/certs"
+  if [[ -f "$certs/test.crt" && -f "$certs/test.key" ]]; then
+    return 0
+  fi
+  echo "Making a self-signed cert for ${cyan}*.test.localhost${reset} in ${certs}"
+  mkdir -p "$certs"
+  openssl req -x509 -newkey rsa:2048 -keyout "$certs/test.key" -out "$certs/test.crt" \
+    -days 365 -nodes -subj "/CN=test.localhost" \
+    -addext "subjectAltName=DNS:test.localhost,DNS:*.test.localhost,DNS:api.test.localhost,DNS:app.test.localhost" \
+    2>/dev/null
+}
+
 function testing-start() {
   require-test-stack-here || return 1
+  testing-cert-ensure || return 1
   cd "$LIFE_HOME" || exit
   testing-remove-orphans
   echo "Starting ${blue}TESTING${reset} environment ${cyan}${LIFE_TEST_PROJECT}${reset}"
@@ -677,6 +694,7 @@ function testing-stop() {
 
 function testing-restart() {
   require-test-stack-here || return 1
+  testing-cert-ensure || return 1
   cd "$LIFE_HOME" || exit
   echo "Restarting ${blue}TESTING${reset} environment ${cyan}${LIFE_TEST_PROJECT}${reset}"
   mkdir -p "$TEST_REPORTS_DIR"
@@ -701,6 +719,7 @@ function testing-rebuild() {
     esac
   done
   require-test-stack-here || return 1
+  testing-cert-ensure || return 1
   mkdir -p "$TEST_REPORTS_DIR"
 
   if [[ "$wipe_volumes" == true ]]; then

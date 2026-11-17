@@ -807,19 +807,9 @@ jobs:
         with:
           version: "latest"
 
-      # The E2E suite drives app.test.localhost through Traefik, which is the
-      # point of it: the dev-only path to the Vue container skips CORS entirely.
-      # Traefik will not start without a cert for that name.
-      - name: Generate self-signed TLS certs for Traefik
-        run: |
-          openssl req -x509 -newkey rsa:2048 -keyout deploy-containers/traefik/certs/test.key \
-            -out deploy-containers/traefik/certs/test.crt -days 1 -nodes \
-            -subj "/CN=test.localhost" \
-            -addext "subjectAltName=DNS:test.localhost,DNS:*.test.localhost,DNS:api.test.localhost,DNS:app.test.localhost"
-
-      # The same commands as a workstation: the stack builds, starts and
-      # initializes its database, and the browser runs inside its vue container,
-      # whose image carries Node and Chromium.
+      # The same commands as a workstation: the stack makes its Traefik cert,
+      # builds, starts and initializes its database, and the browser runs
+      # inside its vue container, whose image carries Node and Chromium.
       - name: Start test stack
         run: ./ops/lifeops testing start
 

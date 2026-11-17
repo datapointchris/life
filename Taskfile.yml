@@ -41,8 +41,10 @@ tasks:
   # The copied .env carries fixed ports (8000, 5432, 6379). Two worktrees
   # running servers at once collide on all of them — edit the copy when that
   # happens rather than assuming this handles it.
+  # A checkout cloned fresh, as CI's or a pod's is, has no .env or certs to
+  # copy, and its test stack makes the cert it needs.
   setup-local:
-    desc: Copy in what git cannot carry, from the primary checkout
+    desc: Copy in what git cannot carry, from the primary checkout, where it has it
     internal: true
     vars:
       PRIMARY:
@@ -50,9 +52,9 @@ tasks:
     status:
       - test "$(pwd)" = "{{.PRIMARY}}"
     cmds:
-      - cp -n {{.PRIMARY}}/.env .env
+      - if [ -f {{.PRIMARY}}/.env ]; then cp -n {{.PRIMARY}}/.env .env; fi
       - mkdir -p deploy-containers/traefik/certs
-      - cp -n {{.PRIMARY}}/deploy-containers/traefik/certs/*.crt {{.PRIMARY}}/deploy-containers/traefik/certs/*.key deploy-containers/traefik/certs/
+      - for f in {{.PRIMARY}}/deploy-containers/traefik/certs/*.crt {{.PRIMARY}}/deploy-containers/traefik/certs/*.key; do if [ -f "$f" ]; then cp -n "$f" deploy-containers/traefik/certs/; fi; done
 
   test:
     desc: Run every suite but e2e — Python, the CLI and the frontend
