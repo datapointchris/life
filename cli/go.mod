@@ -5,7 +5,7 @@ go 1.26.8
 toolchain go1.26.11
 
 require (
-	github.com/datapointchris/goclikit v0.5.3
+	github.com/datapointchris/goclikit v0.6.0
 	github.com/datapointchris/goselfupdate v0.11.0
 	github.com/datapointchris/gotermstyle v0.6.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
