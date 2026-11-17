@@ -50,6 +50,15 @@
     >
       {{ count }}
     </span>
+    <button
+      type="button"
+      class="shopping-section__add"
+      data-testid="shopping-section-add"
+      :aria-label="`Add an item to ${title}`"
+      @click="emit('add')"
+    >
+      <i class="fa-solid fa-plus"></i>
+    </button>
     <template v-if="section">
       <button
         type="button"
@@ -88,6 +97,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   toggle: []
+  add: []
   rename: [name: string]
   delete: []
 }>()

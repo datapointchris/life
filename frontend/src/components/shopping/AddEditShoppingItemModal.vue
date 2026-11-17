@@ -107,6 +107,8 @@ const props = defineProps<{
   catalog: ShoppingItem[]
   editData?: ShoppingItem | null
   initialName?: string
+  // A section key (an id, or Unsorted's) the add form opens on, as though chosen by hand.
+  initialSection?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -152,7 +154,12 @@ watch(
     } else {
       form.name = props.initialName ?? ''
       form.note = ''
-      form.section = rememberedSection(form.name)
+      if (props.initialSection) {
+        form.section = props.initialSection
+        sectionChosen.value = true
+      } else {
+        form.section = rememberedSection(form.name)
+      }
     }
   }
 )

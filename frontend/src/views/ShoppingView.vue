@@ -108,6 +108,7 @@
         :count="unsortedItems.length"
         :collapsed="isCollapsed(UNSORTED_KEY)"
         @toggle="toggle(UNSORTED_KEY)"
+        @add="openAddTo(UNSORTED_KEY)"
       />
       <draggable
         v-show="!isCollapsed(UNSORTED_KEY)"
@@ -154,6 +155,7 @@
             :count="itemsOf(section.id).length"
             :collapsed="isCollapsed(section.id)"
             @toggle="toggle(section.id)"
+            @add="openAddTo(section.id)"
             @rename="renameSection(section, $event)"
             @delete="deleteSection(section)"
           />
@@ -276,6 +278,7 @@
       :catalog="store.catalog"
       :edit-data="editTarget"
       :initial-name="modalName"
+      :initial-section="modalSection"
       @close="closeModal"
       @create="createFromModal"
       @update="updateFromModal"
@@ -322,6 +325,7 @@ const newSectionName = ref('')
 const showModal = ref(false)
 const editTarget = ref<ShoppingItem | null>(null)
 const modalName = ref('')
+const modalSection = ref<string | null>(null)
 
 // Draggable mutates the lists it is given, so it gets copies the store rebuilds after every write.
 const unsortedItems = ref<ShoppingItem[]>([])
@@ -495,6 +499,14 @@ async function deleteSection(section: ShoppingSection) {
 function openAdd() {
   editTarget.value = null
   modalName.value = typed.value.trim()
+  modalSection.value = null
+  showModal.value = true
+}
+
+function openAddTo(sectionKey: string) {
+  editTarget.value = null
+  modalName.value = typed.value.trim()
+  modalSection.value = sectionKey
   showModal.value = true
 }
 
@@ -507,6 +519,7 @@ function closeModal() {
   showModal.value = false
   editTarget.value = null
   modalName.value = ''
+  modalSection.value = null
 }
 
 async function createFromModal(data: ShoppingItemCreate) {

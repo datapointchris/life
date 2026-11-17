@@ -28,7 +28,7 @@ const NeuSelectStub = {
 }
 
 // Mounted closed, then opened, because the form loads on that transition.
-async function mountModal(props: { editData?: ShoppingItem | null; initialName?: string } = {}) {
+async function mountModal(props: { editData?: ShoppingItem | null; initialName?: string; initialSection?: string | null } = {}) {
   const wrapper = mount(AddEditShoppingItemModal, {
     props: { visible: false, sections: [grocery, costco], catalog: [eggs], ...props },
     global: {
@@ -63,6 +63,14 @@ describe('AddEditShoppingItemModal', () => {
     const wrapper = await mountModal()
     await wrapper.get('[data-testid="shopping-item-name-input"]').setValue('Eggs')
     expect(select(wrapper).props('modelValue')).toBe('costco-id')
+  })
+
+  it('opened from a section, it adds there even for a name last kept elsewhere', async () => {
+    const wrapper = await mountModal({ initialSection: 'grocery-id' })
+    await wrapper.get('[data-testid="shopping-item-name-input"]').setValue('eggs')
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('create')?.[0]?.[0]).toEqual({ name: 'eggs', note: undefined, section: 'grocery-id' })
   })
 
   it('choosing Unsorted for a known name sends null, so it leaves its old section', async () => {
