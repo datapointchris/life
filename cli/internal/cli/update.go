@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/datapointchris/goclikit"
 	"github.com/datapointchris/goselfupdate"
@@ -45,6 +47,13 @@ func newUpdateCommand() *cobra.Command {
 	return goclikit.UpdateCommand(updateConfig())
 }
 
+// ghTokenTimeout bounds the gh fallback. Reading a stored token is local and
+// fast, and a gh that hangs would otherwise stall the update check it feeds.
+const (
+	ghTokenTimeout   = 5 * time.Second
+	ghTokenWaitDelay = time.Second
+)
+
 // githubToken resolves a GitHub credential: the environment first, then the gh
 // CLI's stored token. goselfupdate reads $GITHUB_TOKEN and $GH_TOKEN itself, so
 // this adds the gh fallback, which lifts the 60-requests-per-hour
@@ -55,7 +64,14 @@ func githubToken() string {
 			return token
 		}
 	}
-	out, err := exec.Command("gh", "auth", "token").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), ghTokenTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
+	// Output reads through a pipe, and Wait blocks until every process holding
+	// its write end exits. WaitDelay caps that wait, so the timeout holds even
+	// when gh leaves a child behind.
+	cmd.WaitDelay = ghTokenWaitDelay
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
