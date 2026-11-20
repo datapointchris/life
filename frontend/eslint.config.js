@@ -48,6 +48,13 @@ export default [
           },
         },
       ],
+      'vue/no-restricted-html-elements': [
+        'error',
+        {
+          element: 'select',
+          message: 'Use NeuSelect. A native select cannot take the neumorphic shadows, and its panel is drawn by the browser.',
+        },
+      ],
     },
   },
 ]
