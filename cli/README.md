@@ -61,8 +61,8 @@ task cli:lint       # go vet + gofmt check
 task cli:format     # gofmt -w .
 ```
 
-Install uses `go build -o`, not `go install`: the module path is `life/cli`,
-so `go install` would name the binary after the path's last segment (`cli`).
+Install uses `go build -o`, not `go install`: the module path is
+`github.com/datapointchris/life/cli`, so `go install` would name the binary after the path's last segment (`cli`).
 
 These build from your working tree, version-stamped with `git describe`. Released
 binaries are built by CI on a `cli/v*` tag and published to GitHub Releases; that
