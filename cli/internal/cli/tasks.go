@@ -81,8 +81,8 @@ func newTasksListCommand() *cobra.Command {
 			"An open task has no closing date, so it falls outside every window — pair\n" +
 			"them with --status completed to read a week's finished work.\n" +
 			"\n" +
-			"--category narrows to one of: " + strings.Join(api.TaskCategories, ", ") + ".\n" +
-			"It is matched by the API, so --limit caps the category rather than the\n" +
+			"--category narrows to one category, listed under Flags. It is matched\n" +
+			"by the API, so --limit caps the category rather than the\n" +
 			"whole list.",
 		Example: "  life tasks list\n" +
 			"  life tasks list --category Personal\n" +
