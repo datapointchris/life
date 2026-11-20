@@ -106,7 +106,7 @@ def safe_int(value: int | float | str | None, default: int = 0) -> int:
         return default
     try:
         return int(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return default
 
 
@@ -115,7 +115,7 @@ def safe_float(value: int | float | str | None, default: float = 0.0) -> float:
         return default
     try:
         return float(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return default
 
 

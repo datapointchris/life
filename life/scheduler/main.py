@@ -37,7 +37,7 @@ def create_scheduler(settings: Settings) -> BlockingScheduler:
     try:
         logger.info('scheduler_starting')
         scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt, SystemExit:
         pass
     finally:
         logger.info('scheduler_shutting_down')

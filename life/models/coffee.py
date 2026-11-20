@@ -50,7 +50,7 @@ class CoffeeShop(Base):
     review: Mapped[str | None] = mapped_column(Text, nullable=True)
     date_visited: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    beans: Mapped[list['CoffeeBean']] = relationship('CoffeeBean', back_populates='coffee_shop')
+    beans: Mapped[list[CoffeeBean]] = relationship('CoffeeBean', back_populates='coffee_shop')
 
     def __repr__(self) -> str:
         return f'CoffeeShop(id={self.id!r}, name={self.name!r}, city={self.city!r})'
@@ -78,7 +78,7 @@ class CoffeeBean(Base):
     purchase_source: Mapped[str | None] = mapped_column(Text, nullable=True)
     purchase_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    coffee_shop: Mapped['CoffeeShop | None'] = relationship('CoffeeShop', back_populates='beans')
+    coffee_shop: Mapped[CoffeeShop | None] = relationship('CoffeeShop', back_populates='beans')
 
     def __repr__(self) -> str:
         return f'CoffeeBean(id={self.id!r}, name={self.name!r}, roaster={self.roaster!r})'

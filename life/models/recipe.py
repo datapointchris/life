@@ -128,7 +128,7 @@ class Recipe(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    ingredients: Mapped[list['RecipeIngredient']] = relationship(
+    ingredients: Mapped[list[RecipeIngredient]] = relationship(
         'RecipeIngredient',
         back_populates='recipe',
         cascade='all, delete-orphan',
@@ -152,7 +152,7 @@ class RecipeIngredient(Base):
     is_optional: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default='false')
     ingredient_group: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    recipe: Mapped['Recipe'] = relationship('Recipe', back_populates='ingredients')
+    recipe: Mapped[Recipe] = relationship('Recipe', back_populates='ingredients')
 
     def __repr__(self) -> str:
         return f'RecipeIngredient(id={self.id!r}, recipe_id={self.recipe_id!r}, item={self.item!r})'

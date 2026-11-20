@@ -10,8 +10,6 @@ A purchase copies the item's name, note and section at the moment it was bought,
 so the log reads the same after the item is renamed, moved or forgotten.
 """
 
-from __future__ import annotations
-
 import datetime as dt
 from uuid import UUID
 from uuid import uuid7

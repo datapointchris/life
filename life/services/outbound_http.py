@@ -54,7 +54,7 @@ class FetchedPage:
     status_code: int
     content: bytes
 
-    def raise_for_status(self) -> 'FetchedPage':
+    def raise_for_status(self) -> FetchedPage:
         """Return the page when it succeeded, so a caller can chain it onto `get_page`."""
         if not 200 <= self.status_code < 300:
             raise PageStatusError(self.url, self.status_code)

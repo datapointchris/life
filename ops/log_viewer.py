@@ -201,7 +201,7 @@ def read_bluegreen_color() -> str:
     state_file = Path('/var/lib/life/bluegreen-state')
     try:
         return state_file.read_text().strip()
-    except (FileNotFoundError, PermissionError):
+    except FileNotFoundError, PermissionError:
         return ''
 
 

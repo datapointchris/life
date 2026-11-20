@@ -120,7 +120,7 @@ class OIDCTokenVerifier:
         self.jwk_client = jwk_client
 
     @classmethod
-    def from_discovery(cls, issuer: str, cli_client_id_prefix: str, service_client_id_prefix: str) -> 'OIDCTokenVerifier':
+    def from_discovery(cls, issuer: str, cli_client_id_prefix: str, service_client_id_prefix: str) -> OIDCTokenVerifier:
         jwks_uri = discover_jwks_uri(issuer)
         client = jwt.PyJWKClient(jwks_uri, headers={'User-Agent': USER_AGENT})
         return cls(issuer, cli_client_id_prefix, service_client_id_prefix, client)

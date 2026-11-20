@@ -68,17 +68,17 @@ def get_commit_info() -> dict:
         if 'insertion' in summary:
             try:
                 insertions = int(summary.split('insertion')[0].split(',')[-1].strip())
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 insertions = 0
         if 'deletion' in summary:
             try:
                 deletions = int(summary.split('deletion')[0].split(',')[-1].strip())
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 deletions = 0
         if 'file' in summary:
             try:
                 files_changed = int(summary.split('file')[0].strip())
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 files_changed = 0
 
     return {
