@@ -3,8 +3,10 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
+	"unicode/utf8"
 
 	"github.com/datapointchris/goclikit"
 	"github.com/spf13/cobra"
@@ -406,13 +408,28 @@ func printBooksTable(out io.Writer, books []api.Book) {
 		_, _ = fmt.Fprintln(out, "No books.")
 		return
 	}
-	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tPROGRESS\tOWNED\tRATING\tTITLE\tAUTHOR")
-	for _, b := range books {
-		_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", b.ID, b.Progress, b.Ownership, intOrDash(b.Rating), b.Title, b.Author)
+	header := []string{"ID", "PROGRESS", "OWNED", "RATING"}
+	rows := make([][]string, len(books))
+	authorWidth := len("AUTHOR")
+	for i, b := range books {
+		rows[i] = []string{strconv.Itoa(b.ID), b.Progress, b.Ownership, intOrDash(b.Rating)}
+		authorWidth = max(authorWidth, utf8.RuneCountInString(strings.Join(strings.Fields(b.Author), " ")))
+	}
+	authorWidth = min(authorWidth, bookAuthorWidth)
+	titleWidth := max(listWidth-leadingWidth(header, rows)-columnGap-authorWidth, minFreeTextWidth)
+
+	tw := tabwriter.NewWriter(out, 0, 4, columnGap, ' ', 0)
+	_, _ = fmt.Fprintln(tw, strings.Join(header, "\t")+"\tTITLE\tAUTHOR")
+	for i, b := range books {
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", strings.Join(rows[i], "\t"),
+			truncateTitle(b.Title, titleWidth), truncateTitle(b.Author, authorWidth))
 	}
 	_ = tw.Flush()
 }
+
+// bookAuthorWidth is the most of a books table row AUTHOR takes, which fits
+// most names whole and leaves TITLE the larger share.
+const bookAuthorWidth = 20
 
 func printBookDetail(out io.Writer, b api.Book) {
 	_, _ = fmt.Fprintf(out, "%s\n", b.Title)

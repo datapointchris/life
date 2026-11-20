@@ -650,10 +650,17 @@ func printTaskList(out io.Writer, tasks []api.Task) {
 	}
 	// The row number is the queue position. The sort date behind it is never
 	// printed, so the list reads as an order rather than a set of deadlines.
-	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "#\tID\tPIN\tSTATUS\tCATEGORY\tNAME")
+	header := []string{"#", "ID", "PIN", "STATUS", "CATEGORY"}
+	rows := make([][]string, len(tasks))
 	for i, t := range tasks {
-		_, _ = fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\n", i+1, t.ID, pinMark(t), taskStatus(t), t.Category, t.Name)
+		rows[i] = []string{strconv.Itoa(i + 1), strconv.Itoa(t.ID), pinMark(t), taskStatus(t), t.Category}
+	}
+	nameWidth := max(listWidth-leadingWidth(header, rows), minFreeTextWidth)
+
+	tw := tabwriter.NewWriter(out, 0, 4, columnGap, ' ', 0)
+	_, _ = fmt.Fprintln(tw, strings.Join(header, "\t")+"\tNAME")
+	for i, t := range tasks {
+		_, _ = fmt.Fprintf(tw, "%s\t%s\n", strings.Join(rows[i], "\t"), truncateTitle(t.Name, nameWidth))
 	}
 	_ = tw.Flush()
 }

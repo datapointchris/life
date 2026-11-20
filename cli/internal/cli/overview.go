@@ -459,7 +459,7 @@ func printTaskSection(out io.Writer, section taskSection) {
 		if i >= printListCap {
 			break
 		}
-		_, _ = fmt.Fprintf(tw, "  %d\t%s\t%s\n", i+1, truncateTitle(task.Name), task.Category)
+		_, _ = fmt.Fprintf(tw, "  %d\t%s\t%s\n", i+1, truncateTitle(task.Name, overviewTitleWidth), task.Category)
 	}
 	_ = tw.Flush()
 }
@@ -485,13 +485,13 @@ func printBookSection(out io.Writer, section bookSection) {
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	for _, book := range section.Reading {
-		_, _ = fmt.Fprintf(tw, "  reading:\t%s\t%s\n", truncateTitle(book.Title), book.Author)
+		_, _ = fmt.Fprintf(tw, "  reading:\t%s\t%s\n", truncateTitle(book.Title, overviewTitleWidth), book.Author)
 	}
 	for i, book := range section.NextUp {
 		if i >= printListCap {
 			break
 		}
-		_, _ = fmt.Fprintf(tw, "  next:\t%s\t%s\n", truncateTitle(book.Title), book.Author)
+		_, _ = fmt.Fprintf(tw, "  next:\t%s\t%s\n", truncateTitle(book.Title, overviewTitleWidth), book.Author)
 	}
 	_ = tw.Flush()
 }
@@ -515,13 +515,13 @@ func printArticleSection(out io.Writer, section articleSection) {
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	if section.Current != nil {
-		_, _ = fmt.Fprintf(tw, "  reading:\t%s\n", truncateTitle(section.Current.Title))
+		_, _ = fmt.Fprintf(tw, "  reading:\t%s\n", truncateTitle(section.Current.Title, overviewTitleWidth))
 	}
 	for i, article := range section.Unread {
 		if i >= printListCap {
 			break
 		}
-		_, _ = fmt.Fprintf(tw, "  next:\t%s\n", truncateTitle(article.Title))
+		_, _ = fmt.Fprintf(tw, "  next:\t%s\n", truncateTitle(article.Title, overviewTitleWidth))
 	}
 	_ = tw.Flush()
 }
@@ -551,7 +551,7 @@ func printUpcomingSection(out io.Writer, countdowns countdownSection, events eve
 		if i >= printListCap {
 			break
 		}
-		_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\n", entry.date, truncateTitle(entry.name), entry.kind)
+		_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\n", entry.date, truncateTitle(entry.name, overviewTitleWidth), entry.kind)
 	}
 	_ = tw.Flush()
 }
@@ -562,15 +562,6 @@ type upcomingEntry struct {
 	kind string
 }
 
-// truncateTitle fits a title into the column, collapsing it onto one line first:
-// scraped article titles carry the source page's newlines and tabs, which would
-// otherwise break the tabwriter's alignment and defeat the width limit.
-func truncateTitle(title string) string {
-	const titleWidth = 60
-	title = strings.Join(strings.Fields(title), " ")
-	runes := []rune(title)
-	if len(runes) <= titleWidth {
-		return title
-	}
-	return string(runes[:titleWidth-1]) + "…"
-}
+// overviewTitleWidth is where the overview cuts a title, so one long scraped
+// title cannot widen every row of its section.
+const overviewTitleWidth = 60
