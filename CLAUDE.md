@@ -203,7 +203,7 @@ Cooking techniques are part of the Recipes domain and not a separate entity, so 
 
   Ten manual docker subcommands — `exec`, `restart`, `logs`, `images`, `image inspect`, `run --rm`, `volume ls`, `inspect --format` and a `sudo ls` on a volume path — once failed to diagnose what step 2 with `--volumes` then fixed in 90 seconds. Each one feels like progress and all of it is archaeology. The tell that it has gone wrong is proposing a workaround rather than an escalation: baking the venv into the image is a workaround, and the ladder is the escalation.
 - **Pre-commit config is generated.** `.pre-commit-config.yaml` and `.github/workflows/validate.yml` carry a `# forge-toolchain:` stamp; hand edits belong in a `# > custom:` block, which regeneration preserves. Vue hooks trigger only on `frontend/**/*.{vue,ts,tsx,js,jsx}`.
-- **Pre-commit "files were modified" failures**: pre-commit fails whichever hook changed a tracked file, so the hook it names is the one that wrote. `devstats capture` writes only gitignored output. Every runner in `stats/hooks/` measures without writing: a check flag where the tool has one, and otherwise the tool runs on scratch copies of the staged files (`stats/hooks/_scratch_copies.py`). So a new capture runner whose tool rewrites files takes one of the two. The usual writers are `generate-fixture-diagrams` regenerating SVGs (triggered by `tests/conftest.py` or `mkdocs_plugins/diagrams/` changes) and `ruff-check` auto-fixing code. Stage what they wrote with `git add` and retry.
+- **Pre-commit "files were modified" failures**: pre-commit fails whichever hook changed a tracked file, so the hook it names is the one that wrote. `devstats capture` writes only gitignored output. It runs every tool itself, because capture exists to keep each tool's structured result, and parsing pre-commit's summary instead was tried and could not. A slow capture is fixed in the slow runner, never by dropping it from the capture list. Every runner in `stats/hooks/` measures without writing: a check flag where the tool has one, and otherwise the tool runs on scratch copies of the staged files (`stats/hooks/_scratch_copies.py`). So a new capture runner whose tool rewrites files takes one of the two. The usual writers are `generate-fixture-diagrams` regenerating SVGs (triggered by `tests/conftest.py` or `mkdocs_plugins/diagrams/` changes) and `ruff-check` auto-fixing code. Stage what they wrote with `git add` and retry.
 - **A time column is one of three kinds, and the kind decides the type**: pick before writing the column, because all three are spelled `datetime` in Python and only one of them should be.
   1. **A moment that happened** — a completion, a login, a row appearing. `DateTime(timezone=True)`, written as `datetime.now(UTC)`, `server_default=func.now()`, or `pendulum.now()`. Never bare `datetime.now()`: naive is interpreted using Postgres's session `TimeZone`, so it is correct only while every container happens to run UTC. The three accepted forms all carry an offset, which is the property that matters; `pendulum.now()` carries the machine's zone rather than UTC and is correct for the same reason. Its request field is `AwareDatetime`, which refuses a reading with no offset.
   2. **A calendar day** — a purchase date, a day a habit was done, a due date. `Date`. Not a timestamp: a `YYYY-MM-DD` arriving as a timestamp becomes midnight UTC, and every reader west of UTC then renders the day before. Its request field is `date`.
@@ -222,9 +222,22 @@ Cooking techniques are part of the Recipes domain and not a separate entity, so 
 
 ### Styling & Design Cohesion
 
+**The site keeps its personality.** It is a personal site, so distinctive styling outranks a clean,
+generic look: the 3D box shadows, the dark teal palette, the monospace font. A migration keeps the
+existing SCSS classes, a design review sharpens the character rather than normalizing it, and a new
+component speaks the same shadow vocabulary. Rough but interesting beats the templated look of a
+generated frontend.
+
 **Global over scoped**: visual styling comes from the shared SCSS in `frontend/src/assets/sass/`; a scoped `<style>` block handles layout only (flexbox, grid, spacing).
 
 **Neumorphic shadow variables** (`layout/_grid.scss`): `--shadow-card` is raised, `--shadow-card-active` is sunken, and `--shadow-card-hover` / `--shadow-card-hover-active` are the hover states. Buttons take `--shadow-button`, `--shadow-button-hover` and `--shadow-button-active` (`components/_buttons.scss`).
+A highlight is `--clr-shadow-highlight-*` (`abstracts/_colors.scss`), derived from `--clr-primary` in
+OKLCH, because a neutral gray highlight on a saturated surface reads as its complement. `/admin/design`
+(`AdminDesignView.vue`) renders every shadow state, so a shadow token is tuned there by eye.
+
+**A theme is declared twice**: in `themes` in `composables/useTheme.ts`, and in `ThemeColor` in
+`life/models/user.py`, which refuses a saved preference it does not name. A font is a woff2 in
+`frontend/public/fonts/`, an `@font-face` in `sass/_fonts.scss` and an entry in `fonts` in `useTheme.ts`.
 
 **Shape variables** (`abstracts/_shape.scss`): the `--radius-*` scale, the `--border-card`, `--border-input` and `--border-subnav` roles, and the `--transition-*` durations. A corner takes a step of the scale, never a literal.
 
