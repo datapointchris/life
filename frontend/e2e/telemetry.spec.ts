@@ -1,11 +1,8 @@
-import { test, expect, type Route } from '@playwright/test'
+import { test, expect, type Page, type Route } from '@playwright/test'
 
-// The OTLP posts the SPA sends to the endpoint the test stack names, answered here with page.route.
+// The OTLP posts the SPA sends to the endpoint its environment names, answered here with page.route.
 // How a log line becomes a record is covered by src/utils/__tests__/logger.test.ts.
 
-const isDevEnv = process.env.E2E_ENV === 'dev'
-const OTLP = isDevEnv ? 'https://otel.docker.localhost' : 'https://otel.test.localhost:8443'
-const API = isDevEnv ? 'https://api.docker.localhost/api/v1/' : 'https://api.test.localhost:8443/api/v1/'
 const SPAN_KIND_CLIENT = 3
 
 interface OtlpAttribute {
@@ -45,32 +42,46 @@ async function accept(route: Route) {
   })
 }
 
-test('a page load posts one root span, a client span under it per API call, and log records in its trace', async ({ page }) => {
-  test.setTimeout(45_000)
+/** Answer every OTLP post, whatever origin the build names, and record what each API response returned as X-Request-ID. */
+async function captureTelemetry(page: Page) {
   const traces: OtlpTraces[] = []
   const logs: OtlpLogs[] = []
-  await page.route(`${OTLP}/v1/traces`, async (route) => {
-    traces.push(route.request().postDataJSON())
-    await accept(route)
-  })
-  await page.route(`${OTLP}/v1/logs`, async (route) => {
-    logs.push(route.request().postDataJSON())
-    await accept(route)
-  })
+  await page.route(
+    (url) => url.pathname === '/v1/traces',
+    async (route) => {
+      traces.push(route.request().postDataJSON())
+      await accept(route)
+    }
+  )
+  await page.route(
+    (url) => url.pathname === '/v1/logs',
+    async (route) => {
+      logs.push(route.request().postDataJSON())
+      await accept(route)
+    }
+  )
   const requestIds: string[] = []
   page.on('response', (response) => {
-    if (response.url().startsWith(API) && response.request().method() !== 'OPTIONS') {
+    if (new URL(response.url()).pathname.startsWith('/api/v1/') && response.request().method() !== 'OPTIONS') {
       requestIds.push(response.headers()['x-request-id'] ?? '')
     }
   })
+  return {
+    traces,
+    requestIds,
+    spans: () => traces.flatMap((batch) => batch.resourceSpans.flatMap((r) => r.scopeSpans.flatMap((s) => s.spans))),
+    records: () => logs.flatMap((batch) => batch.resourceLogs.flatMap((r) => r.scopeLogs.flatMap((s) => s.logRecords))),
+  }
+}
+
+test('a page load posts one root span, a client span under it per API call, and log records in its trace', async ({ page }) => {
+  test.setTimeout(45_000)
+  const { traces, requestIds, spans, records } = await captureTelemetry(page)
 
   await page.goto('/countdowns')
   await expect(page.locator('.grid')).toBeVisible({ timeout: 10_000 })
 
-  const spans = () => traces.flatMap((batch) => batch.resourceSpans.flatMap((r) => r.scopeSpans.flatMap((s) => s.spans)))
-  const records = () => logs.flatMap((batch) => batch.resourceLogs.flatMap((r) => r.scopeLogs.flatMap((s) => s.logRecords)))
-
-  // The root span ends a second after the page's last API answer, and the next batch posts it.
+  // The root span ends ROOT_IDLE_MS after the page's last API answer, and the next batch posts it.
   await expect.poll(() => spans().filter((span) => !span.parentSpanId).length, { timeout: 15_000 }).toBe(1)
   const root = spans().find((span) => !span.parentSpanId)!
   expect(root.name).toBe('navigation /countdowns')
@@ -94,4 +105,30 @@ test('a page load posts one root span, a client span under it per API call, and 
     expect(completed().filter((record) => record.spanId === span.spanId)).toHaveLength(1)
   }
   expect(records().every((record) => record.traceId === root.traceId)).toBe(true)
+})
+
+test("a click after the page settles roots its own trace, and the store's line about it lands there", async ({ page }) => {
+  test.setTimeout(45_000)
+  const { spans, records } = await captureTelemetry(page)
+
+  await page.goto('/countdowns')
+  await expect(page.locator('.grid')).toBeVisible({ timeout: 10_000 })
+  await expect.poll(() => spans().filter((span) => span.name === 'navigation /countdowns').length, { timeout: 15_000 }).toBe(1)
+
+  await page.getByTestId('countdown-add-button').click()
+  await page.getByTestId('countdown-name-input').fill(`E2E Telemetry ${Date.now()}`)
+  await page.getByTestId('countdown-due-date-input').locator('input').fill('2028-06-15')
+  await page.getByTestId('countdown-submit-button').click()
+
+  await expect.poll(() => spans().filter((span) => span.name === 'activity /countdowns').length, { timeout: 15_000 }).toBe(1)
+  const activity = spans().find((span) => span.name === 'activity /countdowns')!
+  expect(activity.parentSpanId).toBeFalsy()
+  const post = spans().find((span) => span.kind === SPAN_KIND_CLIENT && span.name === 'POST /countdowns')
+  expect(post?.parentSpanId).toBe(activity.spanId)
+
+  await expect
+    .poll(() => records().filter((record) => record.body?.stringValue === 'countdown_created').length, { timeout: 15_000 })
+    .toBe(1)
+  const created = records().find((record) => record.body?.stringValue === 'countdown_created')!
+  expect(created.traceId).toBe(activity.traceId)
 })

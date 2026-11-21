@@ -1,7 +1,7 @@
 // The tracer always runs so every request sends a traceparent; spans and logs leave only where VITE_OTEL_ENDPOINT is set.
 
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, isSpanContextValid, logs, propagation, trace } from '@opentelemetry/api'
-import type { Context, Span } from '@opentelemetry/api'
+import type { Attributes, Context, Span } from '@opentelemetry/api'
 import { W3CTraceContextPropagator } from '@opentelemetry/core'
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
@@ -21,7 +21,7 @@ import {
   ATTR_URL_PATH,
   ATTR_USER_AGENT_ORIGINAL,
 } from '@opentelemetry/semantic-conventions'
-import { START_LOCATION, type Router } from 'vue-router'
+import { START_LOCATION, type RouteLocationNormalized, type Router } from 'vue-router'
 
 export const SERVICE_NAME = 'life-vue'
 
@@ -30,26 +30,29 @@ const ATTR_SESSION_ID = 'session.id'
 const ATTR_URL_TEMPLATE = 'url.template'
 const ATTR_BROWSER_LANGUAGE = 'browser.language'
 
-// A navigation span closes this long after its last request answers; a later request starts its own trace.
-const NAVIGATION_IDLE_MS = 1000
-const NAVIGATION_LIMIT_MS = 30_000
+// A root span closes this long after its last request answers; a later request opens a root of its own.
+const ROOT_IDLE_MS = 1000
+const ROOT_LIMIT_MS = 30_000
 
 const SESSION_STORAGE_KEY = 'life.telemetry.session-id'
 
 const tracer = trace.getTracer(SERVICE_NAME)
 export const telemetryLogger = logs.getLogger(SERVICE_NAME)
 
-interface OpenNavigation {
+// A navigation roots the requests its page makes; an activity roots requests made after the page settled, such as a click's.
+interface OpenRoot {
+  kind: 'navigation' | 'activity'
   span: Span
   context: Context
   requestsInFlight: number
-  routeResolved: boolean
+  settled: boolean
   idleTimer?: ReturnType<typeof setTimeout>
   limitTimer: ReturnType<typeof setTimeout>
 }
 
-let openNavigation: OpenNavigation | undefined
-let latestNavigationContext: Context = ROOT_CONTEXT
+let openRoot: OpenRoot | undefined
+let latestRootContext: Context = ROOT_CONTEXT
+let currentRoute = ''
 
 export interface TelemetryOptions {
   endpoint?: string
@@ -80,46 +83,55 @@ export function startTelemetry(options: TelemetryOptions = optionsFromBuild()): 
 
   context.setGlobalContextManager(new StackContextManager().enable())
   propagation.setGlobalPropagator(new W3CTraceContextPropagator())
-  trace.setGlobalTracerProvider(
-    new TracerProvider({
-      resource,
-      spanProcessors: base ? [new BatchSpanProcessor({ exporter: new OTLPTraceExporter({ url: `${base}/v1/traces`, headers }) })] : [],
-    })
-  )
-  if (base) {
-    logs.setGlobalLoggerProvider(
-      new LoggerProvider({
+  const tracerProvider = new TracerProvider({
+    resource,
+    spanProcessors: base ? [new BatchSpanProcessor({ exporter: new OTLPTraceExporter({ url: `${base}/v1/traces`, headers }) })] : [],
+  })
+  trace.setGlobalTracerProvider(tracerProvider)
+  const loggerProvider = base
+    ? new LoggerProvider({
         resource,
         processors: [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter({ url: `${base}/v1/logs`, headers }) })],
       })
-    )
-  }
+    : undefined
+  if (loggerProvider) logs.setGlobalLoggerProvider(loggerProvider)
 
-  const pageLoad = beginNavigation('page_load', performance.timeOrigin)
+  const pageLoad = beginRoot('navigation', 'navigation', { 'navigation.type': 'page_load' }, performance.timeOrigin)
   if (base) {
     parentDocumentLoadOn(pageLoad.context)
     registerInstrumentations({ instrumentations: [new DocumentLoadInstrumentation()] })
   }
+
+  // Each batch processor's own hide listener runs first; this one ends the open root and flushes that span too.
+  const endAndFlush = () => {
+    if (openRoot) endRoot(openRoot)
+    void tracerProvider.forceFlush()
+    void loggerProvider?.forceFlush()
+  }
+  window.addEventListener('pagehide', endAndFlush)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') endAndFlush()
+  })
 }
 
 /** Open a navigation span on each route change, and name it for the route it reached. */
 export function traceNavigations(router: Router): void {
   router.beforeEach((_to, from) => {
     // The page load's own span covers the first navigation and any redirect inside it.
-    if (from !== START_LOCATION) beginNavigation('route_change')
+    if (from !== START_LOCATION) beginRoot('navigation', 'navigation', { 'navigation.type': 'route_change' })
   })
   router.afterEach((to, from, failure) => {
-    const navigation = openNavigation
-    if (!navigation) return
-    const route = to.matched[to.matched.length - 1]?.path ?? to.path
-    navigation.span.updateName(`navigation ${route}`)
+    currentRoute = routeOf(to)
+    const navigation = openRoot
+    if (navigation?.kind !== 'navigation') return
+    navigation.span.updateName(`navigation ${currentRoute}`)
     navigation.span.setAttributes({
       [ATTR_URL_PATH]: to.path,
-      'navigation.route': route,
+      'navigation.route': currentRoute,
       'navigation.from': from === START_LOCATION ? '' : from.fullPath,
     })
     if (failure) navigation.span.setAttribute('navigation.failure', failure.message)
-    navigation.routeResolved = true
+    navigation.settled = true
     scheduleIdleEnd(navigation)
   })
 }
@@ -134,10 +146,9 @@ export interface ApiRequestTrace {
   end(outcome: { status?: number; errorType?: string }): void
 }
 
-/** Start the client span for one API request, under the navigation that is still settling, if any. */
+/** Start the client span for one API request, under the open root, or under a new activity root where none is open. */
 export function startApiRequest(method: string, url: string, path: string): ApiRequestTrace {
-  const navigation = openNavigation
-  const parent = navigation?.context ?? ROOT_CONTEXT
+  const root = openRoot ?? beginActivity()
   const template = urlTemplate(path)
   const span = tracer.startSpan(
     `${method} ${template}`,
@@ -150,15 +161,13 @@ export function startApiRequest(method: string, url: string, path: string): ApiR
         [ATTR_SERVER_ADDRESS]: hostOf(url),
       },
     },
-    parent
+    root.context
   )
-  const spanContext = trace.setSpan(parent, span)
+  const spanContext = trace.setSpan(root.context, span)
   const headers: Record<string, string> = {}
   propagation.inject(spanContext, headers)
-  if (navigation) {
-    navigation.requestsInFlight += 1
-    clearTimeout(navigation.idleTimer)
-  }
+  root.requestsInFlight += 1
+  clearTimeout(root.idleTimer)
 
   return {
     traceId: isSpanContextValid(span.spanContext()) ? span.spanContext().traceId : undefined,
@@ -171,18 +180,16 @@ export function startApiRequest(method: string, url: string, path: string): ApiR
         span.setStatus({ code: SpanStatusCode.ERROR })
       }
       span.end()
-      if (navigation) {
-        navigation.requestsInFlight -= 1
-        scheduleIdleEnd(navigation)
-      }
+      root.requestsInFlight -= 1
+      scheduleIdleEnd(root)
     },
   }
 }
 
-/** The context a log record is written in: the active span's, else the latest navigation's. */
+/** The context a log record is written in: the active span's, else the latest root's, so a store's line after an await joins its request's trace. */
 export function logContext(): Context {
   const active = context.active()
-  return trace.getSpan(active) ? active : latestNavigationContext
+  return trace.getSpan(active) ? active : latestRootContext
 }
 
 /** A path with each numeric segment replaced, so `/tasks/12/complete` reads `/tasks/{id}/complete`. */
@@ -190,32 +197,42 @@ export function urlTemplate(path: string): string {
   return (path.split('?')[0] ?? '').replace(/\/\d+(?=\/|$)/g, '/{id}')
 }
 
-function beginNavigation(type: 'page_load' | 'route_change', startTime?: number): OpenNavigation {
-  if (openNavigation) endNavigation(openNavigation)
-  const span = tracer.startSpan('navigation', { root: true, startTime, attributes: { 'navigation.type': type } })
-  const navigation: OpenNavigation = {
+function beginActivity(): OpenRoot {
+  const route = currentRoute || window.location.pathname
+  return beginRoot('activity', `activity ${route}`, { [ATTR_URL_PATH]: window.location.pathname, 'activity.route': route })
+}
+
+function beginRoot(kind: OpenRoot['kind'], name: string, attributes: Attributes, startTime?: number): OpenRoot {
+  if (openRoot) endRoot(openRoot)
+  const span = tracer.startSpan(name, { root: true, startTime, attributes })
+  const root: OpenRoot = {
+    kind,
     span,
     context: trace.setSpan(ROOT_CONTEXT, span),
     requestsInFlight: 0,
-    routeResolved: false,
-    limitTimer: setTimeout(() => endNavigation(navigation), NAVIGATION_LIMIT_MS),
+    settled: kind === 'activity',
+    limitTimer: setTimeout(() => endRoot(root), ROOT_LIMIT_MS),
   }
-  openNavigation = navigation
-  latestNavigationContext = navigation.context
-  return navigation
+  openRoot = root
+  latestRootContext = root.context
+  return root
 }
 
-function scheduleIdleEnd(navigation: OpenNavigation): void {
-  clearTimeout(navigation.idleTimer)
-  if (openNavigation !== navigation || !navigation.routeResolved || navigation.requestsInFlight > 0) return
-  navigation.idleTimer = setTimeout(() => endNavigation(navigation), NAVIGATION_IDLE_MS)
+function scheduleIdleEnd(root: OpenRoot): void {
+  clearTimeout(root.idleTimer)
+  if (openRoot !== root || !root.settled || root.requestsInFlight > 0) return
+  root.idleTimer = setTimeout(() => endRoot(root), ROOT_IDLE_MS)
 }
 
-function endNavigation(navigation: OpenNavigation): void {
-  clearTimeout(navigation.idleTimer)
-  clearTimeout(navigation.limitTimer)
-  if (openNavigation === navigation) openNavigation = undefined
-  navigation.span.end()
+function endRoot(root: OpenRoot): void {
+  clearTimeout(root.idleTimer)
+  clearTimeout(root.limitTimer)
+  if (openRoot === root) openRoot = undefined
+  root.span.end()
+}
+
+function routeOf(to: RouteLocationNormalized): string {
+  return to.matched[to.matched.length - 1]?.path ?? to.path
 }
 
 // The document-load instrumentation parents its span on a traceparent meta tag, which puts it in the page load's trace.

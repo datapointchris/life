@@ -174,11 +174,11 @@ services:
   # Vue Frontend Service - Production (Caddy serves built SPA assets)
   vue:
     image: life-vue:production
+    # Built with no VITE_OTEL_ENDPOINT, so CI's and a local production build post no telemetry.
+    # The release workflow builds the deployed image with production's.
     build:
       context: .
       dockerfile: frontend/Dockerfile
-      args:
-        VITE_API_URL: "/api/v1"
     container_name: life-prod-vue
     ports: []
     networks:
