@@ -10,9 +10,14 @@ RUN npm ci
 # Copy frontend source
 COPY frontend/ .
 
-# Build arg for API URL (set in docker-compose per environment)
-ARG VITE_API_URL
-ENV VITE_API_URL=${VITE_API_URL}
+# Only production builds this image, and its API sits under the page's own origin.
+ARG VITE_API_URL=/api/v1
+
+# Where the SPA sends its traces and log records, and the token it sends with them. Left unset,
+# nothing leaves the browser. The token ships in the bundle, so it gates the endpoint without
+# being secret, and an ARG keeps a new token from being masked by a cached build layer.
+ARG VITE_OTEL_ENDPOINT
+ARG VITE_OTEL_INGEST_TOKEN
 
 RUN npm run build
 

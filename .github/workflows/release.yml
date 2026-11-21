@@ -64,12 +64,11 @@ jobs:
           - image: life
             dockerfile: Dockerfile
             target: production
-            build_args: ""
+          # otel_endpoint is where the image's SPA posts its traces and logs, with OTEL_INGEST_TOKEN.
           - image: life-vue
             dockerfile: frontend/Dockerfile
             target: ""
-            build_args: |
-              VITE_API_URL=/api/v1
+            otel_endpoint: https://otel.ichrisbirch.com
     steps:
       - uses: actions/checkout@v7
       # SHA-pinned because they are third-party and the major tag moves. The
@@ -93,13 +92,26 @@ jobs:
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=latest
+      # Without the token the gateway refuses every post, and the exporters drop the refusal in the browser.
+      - name: Refuse an SPA build with no ingest token
+        if: matrix.otel_endpoint
+        env:
+          OTEL_INGEST_TOKEN: ${{ secrets.OTEL_INGEST_TOKEN }}
+        run: |
+          if [ -z "$OTEL_INGEST_TOKEN" ]; then
+            echo "::error::OTEL_INGEST_TOKEN is empty, so ${{ matrix.image }} would post to ${{ matrix.otel_endpoint }} without it"
+            exit 1
+          fi
       - name: Build and push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
-          build-args: ${{ matrix.build_args }}
+          # The strategy block cannot read secrets, so the ingest token joins here.
+          build-args: |
+            ${{ matrix.otel_endpoint && format('VITE_OTEL_ENDPOINT={0}', matrix.otel_endpoint) || '' }}
+            ${{ matrix.otel_endpoint && format('VITE_OTEL_INGEST_TOKEN={0}', secrets.OTEL_INGEST_TOKEN) || '' }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

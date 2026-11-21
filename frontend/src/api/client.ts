@@ -1,18 +1,20 @@
 import axios from 'axios'
 import { createLogger } from '@/utils/logger'
+import { startApiRequest, type ApiRequestTrace } from '@/utils/telemetry'
 import { extractApiError } from './errors'
 
 const logger = createLogger('ApiClient')
 
 const apiUrl = import.meta.env.VITE_API_URL || 'https://api.docker.localhost/api/v1'
 
-// Track request metadata (start time, request ID) outside Axios's config object.
-// WeakMap avoids type augmentation issues and cleans up automatically.
+// Request metadata lives outside Axios's config object, so no type augmentation is needed.
 interface RequestMeta {
   startTime: number
-  requestId: string
+  request: ApiRequestTrace
 }
 const requestMeta = new WeakMap<object, RequestMeta>()
+
+const inRequestContext = (meta: RequestMeta | undefined, log: () => void) => (meta ? meta.request.inContext(log) : log())
 
 export const api = axios.create({
   baseURL: apiUrl,
@@ -23,35 +25,38 @@ export const api = axios.create({
   withCredentials: true,
 })
 
-// Request interceptor: inject X-Request-ID and log outgoing request
+// Request interceptor: open the request's client span, send its traceparent, and log the request
 api.interceptors.request.use((config) => {
-  const requestId = crypto.randomUUID().slice(0, 8)
-  config.headers.set('X-Request-ID', requestId)
+  const method = config.method?.toUpperCase() ?? 'GET'
+  const url = `${config.baseURL}${config.url}`
+  const request = startApiRequest(method, url, config.url ?? '')
+  for (const [name, value] of Object.entries(request.headers)) {
+    config.headers.set(name, value)
+  }
 
-  requestMeta.set(config, { startTime: Date.now(), requestId })
+  requestMeta.set(config, { startTime: Date.now(), request })
 
-  logger.debug('request_outgoing', {
-    method: config.method?.toUpperCase(),
-    url: `${config.baseURL}${config.url}`,
-    request_id: requestId,
-  })
+  request.inContext(() => logger.debug('request_outgoing', { method, url, request_id: request.traceId }))
 
   return config
 })
 
-// Response interceptor: log response and convert errors to ApiError
+// Response interceptor: end the request's span, log the response, and convert errors to ApiError
 api.interceptors.response.use(
   (response) => {
     const meta = requestMeta.get(response.config)
     const duration = meta ? Date.now() - meta.startTime : 0
+    meta?.request.end({ status: response.status })
 
-    logger.info('request_completed', {
-      method: response.config.method?.toUpperCase(),
-      url: `${response.config.baseURL}${response.config.url}`,
-      status: response.status,
-      duration_ms: duration,
-      request_id: meta?.requestId,
-    })
+    inRequestContext(meta, () =>
+      logger.info('request_completed', {
+        method: response.config.method?.toUpperCase(),
+        url: `${response.config.baseURL}${response.config.url}`,
+        status: response.status,
+        duration_ms: duration,
+        request_id: meta?.request.traceId,
+      })
+    )
 
     return response
   },
@@ -59,25 +64,31 @@ api.interceptors.response.use(
     const meta = error.config ? requestMeta.get(error.config) : undefined
     const duration = meta ? Date.now() - meta.startTime : 0
     const apiError = extractApiError(error)
+    meta?.request.end({
+      status: apiError.status,
+      errorType: apiError.isNetworkError ? error.code || 'network_error' : String(apiError.status),
+    })
 
-    if (apiError.isNetworkError) {
-      logger.error('request_network_error', {
-        method: error.config?.method?.toUpperCase(),
-        url: error.config ? `${error.config.baseURL}${error.config.url}` : 'unknown',
-        error: apiError.detail,
-        duration_ms: duration,
-        request_id: meta?.requestId,
-      })
-    } else {
-      logger.error('request_failed', {
-        method: error.config?.method?.toUpperCase(),
-        url: error.config ? `${error.config.baseURL}${error.config.url}` : 'unknown',
-        status: apiError.status,
-        detail: apiError.detail,
-        duration_ms: duration,
-        request_id: apiError.requestId || meta?.requestId,
-      })
-    }
+    inRequestContext(meta, () => {
+      if (apiError.isNetworkError) {
+        logger.error('request_network_error', {
+          method: error.config?.method?.toUpperCase(),
+          url: error.config ? `${error.config.baseURL}${error.config.url}` : 'unknown',
+          error: apiError.detail,
+          duration_ms: duration,
+          request_id: meta?.request.traceId,
+        })
+      } else {
+        logger.error('request_failed', {
+          method: error.config?.method?.toUpperCase(),
+          url: error.config ? `${error.config.baseURL}${error.config.url}` : 'unknown',
+          status: apiError.status,
+          detail: apiError.detail,
+          duration_ms: duration,
+          request_id: apiError.requestId || meta?.request.traceId,
+        })
+      }
+    })
 
     return Promise.reject(apiError)
   }

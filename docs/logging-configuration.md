@@ -76,14 +76,14 @@ The request ID is the trace ID wherever the request runs in a trace. `life/api/m
 3. the caller's `X-Request-ID` header
 4. eight fresh hex characters
 
-The response echoes the result as `X-Request-ID`. Where the API recorded a span, it also returns `traceparent`, naming that span. The Vue client mints its own `X-Request-ID` per request. Where that differs from the trace ID, the API logs it beside as `client_request_id`, so the browser's console line still finds the server's.
+The response echoes the result as `X-Request-ID`. Where the API recorded a span, it also returns `traceparent`, naming that span. The Vue client sends a `traceparent` on every request, so the API's `request_id` is the browser's trace ID. A caller's own `X-Request-ID` that differs from the trace ID is logged beside it as `client_request_id`.
 
 ```text
 caller (CLI, job, SPA)                 FastAPI process
 ──────────────────────                 ───────────────
 traceparent: 00-<trace>-<span>-01
 baggage: <member>=<value>
-X-Request-ID: abc12345 (SPA only)
+X-Request-ID: abc12345 (optional)
           │
           └──── HTTP request ────────► server span, child of <span> in <trace>
                                        every baggage member copied onto each span
@@ -107,6 +107,36 @@ A bulk article import stores the enqueuing request's `traceparent` and `baggage`
 Every other `OTEL_*` variable the SDK reads still applies, and overrides the distro's defaults.
 
 Each span's resource also names the process that made it: `process.pid`, its command line, `host.name` (the container) and a `service.instance.id` drawn fresh per process. uvicorn's workers share one service name, so these are what tell one worker's spans from another's.
+
+#### The browser's traces
+
+The SPA traces itself as `life-vue`, from `frontend/src/utils/telemetry.ts`. Its tracer always runs, so every API request carries a `traceparent`. Spans and log records leave the browser only where the build set `VITE_OTEL_ENDPOINT`, the base URL a Collector serves OTLP/HTTP at. `VITE_OTEL_INGEST_TOKEN`, where set, goes with each post as `Authorization: Bearer <token>`. `.github/workflows/release.yml` sets them for the production image.
+
+Each navigation is a root span named for the route it reached, and the first one starts when the browser began loading the page. The axios client in `frontend/src/api/client.ts` opens a client span for each API request under the root span still open, and the API continues that trace:
+
+```text
+navigation /countdowns                  (navigation.type=page_load)
+├── documentLoad                        load timings, from the document-load instrumentation
+│   ├── documentFetch
+│   └── resourceFetch × each script, stylesheet and font
+├── GET /users/me                       client span; the API answers X-Request-ID = this trace
+│   └── life-api server span → SQL
+└── GET /countdowns
+    └── life-api server span → SQL
+```
+
+A root span ends once its requests have answered and gone quiet, or at a hard limit. `ROOT_IDLE_MS` and `ROOT_LIMIT_MS` in `frontend/src/utils/telemetry.ts` set both. A navigation also waits for its route to resolve. Hiding or closing the tab ends the open root and posts it.
+
+A request made with no root open, such as a click's, opens a root of its own named `activity <route>`. Requests that start before that root goes quiet join it, so a create and the refetch after it share one trace:
+
+```text
+activity /countdowns
+├── POST /countdowns                    client span
+│   └── life-api server span → SQL
+└── countdown_created                   log record, written after the POST answered
+```
+
+A log record carries the trace of the span active when it was written, else of the latest root. So a store's line written after its request answers lands in that request's trace.
 
 #### The dev stack's Collector
 
@@ -286,7 +316,7 @@ The project migrated from Python's standard logging module to structlog. Key dif
 
 ## Vue Frontend Logging
 
-The Vue 3 frontend uses **consola** with custom structured reporters that match structlog's output format. This ensures consistent log format across Python and JavaScript services for Loki aggregation.
+The Vue 3 frontend uses **consola** with two reporters: one prints structlog's key=value line to the browser console, and one sends each line as an OpenTelemetry log record.
 
 **Configuration**: `frontend/src/utils/logger.ts`
 
@@ -302,32 +332,23 @@ logger.info('countdown_created', { id: data.id, name: data.name })
 logger.error('countdown_create_failed', { detail: error.detail, status: error.status })
 ```
 
-### Output Formats
+### Output
 
-**Dev (key=value, matching structlog console format)**:
+The browser console prints the key=value line, matching structlog's console format:
 
 ```text
 2026-03-13T15:30:45.123Z [info   ] countdown_created              module=CountdownsStore id=42 name="Summer Trip"
 ```
 
-**Production (JSON, in browser DevTools only)**:
-
-```json
-{"timestamp":"2026-03-13T15:30:45.123Z","level":"info","event":"countdown_created","module":"CountdownsStore","id":42,"name":"Summer Trip"}
-```
-
-In production the JSON reporter calls `console.info(JSON.stringify(...))`, so
-the entry lands in the user's browser DevTools and nowhere else. There is no
-shipping pipeline. Vue is a static SPA in production, so its logs never reach
-a container that Grafana Alloy can scrape.
+Where the build set `VITE_OTEL_ENDPOINT`, every line posts to it as a log record, whatever its level, and the Collector decides which it keeps. The event is its body, `module` and each context field are its attributes, and its trace and span are the ones it was written in.
 
 ### Vue Request Tracing
 
-The Vue API client (`frontend/src/api/client.ts`) adds `X-Request-ID` headers to every outgoing request via an Axios interceptor. This ID is logged in the browser console (consola) and on the server (structlog), as `request_id` or, where the server traced the request, as `client_request_id`. That enables correlation when reading both sides simultaneously. No single query spans both, because the browser's half never leaves the browser.
+The Vue API client (`frontend/src/api/client.ts`) opens a client span for every request and sends its `traceparent`. Each line it writes about a request carries that trace ID as `request_id`, the same value the server logs as `request_id` and answers in `X-Request-ID`. So one trace ID finds the browser's span and log records and the server's spans and lines.
 
 ### Log Level Control
 
-In development, you can change the log level at runtime via the browser console:
+The console prints `info` and above in a production build and `debug` in dev, from `consoleLevel` in `frontend/src/utils/logger.ts`. The level gates the console alone, so every level still posts. In development, change it at runtime from the browser console:
 
 ```javascript
 window.__setLogLevel('debug')  // Show all logs

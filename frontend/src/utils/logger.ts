@@ -4,19 +4,21 @@
  * Mirrors structlog patterns from the Python backend:
  * - Event-based logging with structured context
  * - Module-scoped loggers via createLogger('ModuleName')
- * - Consistent key=value / JSON format
+ * - Consistent key=value format
  *
- * Dev: human-readable structured lines in the browser console.
- * Production: JSON in the browser DevTools — no shipping pipeline. Vue is a
- * static SPA in production, so its logs cannot be scraped by Grafana Alloy.
+ * A line at or above the console's level prints there: info in a production
+ * build, debug in dev. Every line, whatever its level, goes out as an
+ * OpenTelemetry log record wherever `utils/telemetry.ts` exports.
  *
  * Usage:
  *   const logger = createLogger('CountdownsStore')
  *   logger.info('fetch_completed', { count: 5, duration_ms: 123 })
  */
 
+import { SeverityNumber, type LogRecord } from '@opentelemetry/api'
 import { createConsola, LogLevels } from 'consola'
 import type { ConsolaReporter, LogObject } from 'consola'
+import { logContext, telemetryLogger } from './telemetry'
 
 const isDev = import.meta.env.DEV
 
@@ -42,93 +44,92 @@ const CONSOLE_METHOD: Record<string, 'error' | 'warn' | 'info' | 'debug'> = {
   debug: 'debug',
 }
 
-/**
- * Build a structured log line from a LogObject.
- * Exported for testing — this is the core formatting logic.
- */
-export function formatLogLine(logObj: LogObject): { line: string; level: string } {
-  const level = levelName(logObj.level)
-  const timestamp = new Date().toISOString()
-  const tag = logObj.tag || 'app'
+/** One logger call, parsed once, so the console line and the OpenTelemetry record agree. */
+export interface LogCall {
+  level: string
+  event: string
+  module: string
+  fields: Record<string, unknown>
+  date: Date
+}
 
-  // First arg is the event name, rest are context objects
+/** The first argument is the event name; every object argument after it adds fields, skipping null and undefined. */
+export function parseLogCall(logObj: LogObject): LogCall {
   const args = logObj.args || []
-  const event = typeof args[0] === 'string' ? args[0] : logObj.message || 'log'
-  const contextParts: string[] = [`module=${tag}`]
-
-  // Merge all object arguments as structured context
-  for (let i = typeof args[0] === 'string' ? 1 : 0; i < args.length; i++) {
-    const arg = args[i]
+  const named = typeof args[0] === 'string'
+  const fields: Record<string, unknown> = {}
+  for (const arg of named ? args.slice(1) : args) {
     if (arg && typeof arg === 'object' && !Array.isArray(arg)) {
       for (const [key, value] of Object.entries(arg as Record<string, unknown>)) {
-        if (value !== undefined && value !== null) {
-          contextParts.push(`${key}=${formatValue(value)}`)
-        }
+        if (value !== undefined && value !== null) fields[key] = value
       }
     }
   }
+  return {
+    level: levelName(logObj.level),
+    event: named ? (args[0] as string) : logObj.message || 'log',
+    module: logObj.tag || 'app',
+    fields,
+    date: logObj.date,
+  }
+}
 
-  const line = `${timestamp} [${level.padEnd(7)}] ${(event as string).padEnd(30)} ${contextParts.join(' ')}`
+/** The console line for a LogObject, in structlog's key=value shape. */
+export function formatLogLine(logObj: LogObject): { line: string; level: string } {
+  const { level, event, module, fields, date } = parseLogCall(logObj)
+  const contextParts = [`module=${module}`, ...Object.entries(fields).map(([key, value]) => `${key}=${formatValue(value)}`)]
+  const line = `${date.toISOString()} [${level.padEnd(7)}] ${event.padEnd(30)} ${contextParts.join(' ')}`
   return { line, level }
 }
 
-/**
- * Build a JSON log entry from a LogObject for Loki ingestion.
- * Exported for testing.
- */
-export function formatLogJson(logObj: LogObject): Record<string, unknown> {
-  const level = levelName(logObj.level)
-  const args = logObj.args || []
-  const event = typeof args[0] === 'string' ? args[0] : logObj.message || 'log'
-
-  const entry: Record<string, unknown> = {
-    timestamp: new Date().toISOString(),
-    level,
-    event,
-    module: logObj.tag || 'app',
-  }
-
-  for (let i = typeof args[0] === 'string' ? 1 : 0; i < args.length; i++) {
-    const arg = args[i]
-    if (arg && typeof arg === 'object' && !Array.isArray(arg)) {
-      Object.assign(entry, arg)
-    }
-  }
-
-  return entry
+const SEVERITY: Record<string, SeverityNumber> = {
+  error: SeverityNumber.ERROR,
+  warning: SeverityNumber.WARN,
+  info: SeverityNumber.INFO,
+  debug: SeverityNumber.DEBUG,
 }
 
+/** The OpenTelemetry log record for a LogObject: the event as its body, the module and fields as attributes. */
+export function logRecordOf(logObj: LogObject): LogRecord {
+  const { level, event, module, fields, date } = parseLogCall(logObj)
+  return {
+    timestamp: date,
+    severityNumber: SEVERITY[level],
+    severityText: level,
+    body: event,
+    attributes: { module, ...fields } as LogRecord['attributes'],
+  }
+}
+
+// The console's threshold; the root instance passes every level so telemetry sees debug in every build.
+let consoleLevel: number = isDev ? LogLevels.debug : LogLevels.info
+
 /**
- * Structured key=value reporter for dev console output.
+ * Structured key=value reporter for console output.
  * Format mirrors structlog's ConsoleRenderer:
  *   2026-03-13T03:10:00.000Z [info   ] fetch_completed  module=Store count=5
  */
 const structuredReporter: ConsolaReporter = {
   log(logObj: LogObject) {
+    if (logObj.level > consoleLevel) return
     const { line, level } = formatLogLine(logObj)
 
     console[CONSOLE_METHOD[level] || 'info'](line)
   },
 }
 
-/**
- * JSON reporter for production. Emits one JSON object per console.info call,
- * shaped identically to the Python backend's structlog output. Lives only in
- * the user's browser DevTools — there is no shipping pipeline.
- */
-const jsonReporter: ConsolaReporter = {
+// Every level goes out; the Collector decides what it keeps.
+const telemetryReporter: ConsolaReporter = {
   log(logObj: LogObject) {
-    const entry = formatLogJson(logObj)
-
-    console.info(JSON.stringify(entry))
+    telemetryLogger.emit({ ...logRecordOf(logObj), context: logContext() })
   },
 }
 
 // --- Root consola instance ---
 
 const rootConsola = createConsola({
-  level: isDev ? LogLevels.debug : LogLevels.info,
-  reporters: [isDev ? structuredReporter : jsonReporter],
+  level: LogLevels.debug,
+  reporters: [structuredReporter, telemetryReporter],
 })
 
 // --- Public API ---
@@ -147,11 +148,8 @@ export interface Logger {
  *   const logger = createLogger('CountdownsStore')
  *   logger.info('fetch_completed', { count: 5, duration_ms: 123 })
  *
- * Dev output:
+ * Console output:
  *   2026-03-13T03:10:00.000Z [info   ] fetch_completed                module=CountdownsStore count=5 duration_ms=123
- *
- * Production output (JSON for Loki):
- *   {"timestamp":"2026-03-13T03:10:00.000Z","level":"info","event":"fetch_completed","module":"CountdownsStore","count":5,"duration_ms":123}
  */
 export function createLogger(module: string): Logger {
   const scoped = rootConsola.withTag(module)
@@ -165,7 +163,7 @@ export function createLogger(module: string): Logger {
 }
 
 /**
- * Set the minimum log level at runtime.
+ * Set the minimum level the browser console prints, at runtime. Telemetry is unaffected.
  * Useful for enabling debug logging via browser console:
  *   window.__setLogLevel && window.__setLogLevel('debug')
  */
@@ -176,7 +174,7 @@ export function setLogLevel(level: 'debug' | 'info' | 'warning' | 'error'): void
     warning: LogLevels.warn,
     error: LogLevels.error,
   }
-  rootConsola.level = mapping[level] ?? LogLevels.info
+  consoleLevel = mapping[level] ?? LogLevels.info
 }
 
 // Expose setLogLevel globally in dev for debugging

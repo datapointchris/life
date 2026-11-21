@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { formatLogLine, formatLogJson, formatValue, levelName } from '../logger'
+import { formatLogLine, logRecordOf, formatValue, levelName } from '../logger'
+import { SeverityNumber } from '@opentelemetry/api'
 import { LogLevels } from 'consola'
 import type { LogObject } from 'consola'
 
@@ -104,42 +105,19 @@ describe('formatLogLine (structured reporter)', () => {
   })
 })
 
-describe('formatLogJson (JSON reporter for Loki)', () => {
-  it('produces a flat JSON object with all fields', () => {
+describe('logRecordOf (OpenTelemetry reporter)', () => {
+  it('carries the event as its body and the module and context as attributes', () => {
     const logObj = makeLogObj({
-      args: ['request_completed', { method: 'POST', status: 201, duration_ms: 55 }],
+      level: LogLevels.warn,
+      args: ['request_failed', { status: 503, tags: ['a'], absent: undefined }],
     })
 
-    const entry = formatLogJson(logObj)
-
-    expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/)
-    expect(entry.level).toBe('info')
-    expect(entry.event).toBe('request_completed')
-    expect(entry.module).toBe('TestModule')
-    expect(entry.method).toBe('POST')
-    expect(entry.status).toBe(201)
-    expect(entry.duration_ms).toBe(55)
-  })
-
-  it('works without context', () => {
-    const entry = formatLogJson(makeLogObj({ args: ['simple_event'] }))
-
-    expect(entry.event).toBe('simple_event')
-    expect(entry.module).toBe('TestModule')
-    expect(Object.keys(entry)).toEqual(['timestamp', 'level', 'event', 'module'])
-  })
-
-  it('is valid JSON (serializable for Loki)', () => {
-    const logObj = makeLogObj({
-      args: ['test_event', { count: 5, tags: ['a'] }],
+    expect(logRecordOf(logObj)).toEqual({
+      timestamp: logObj.date,
+      severityNumber: SeverityNumber.WARN,
+      severityText: 'warning',
+      body: 'request_failed',
+      attributes: { module: 'TestModule', status: 503, tags: ['a'] },
     })
-
-    const entry = formatLogJson(logObj)
-    const json = JSON.stringify(entry)
-    const parsed = JSON.parse(json)
-
-    expect(parsed.event).toBe('test_event')
-    expect(parsed.count).toBe(5)
-    expect(parsed.tags).toEqual(['a'])
   })
 })

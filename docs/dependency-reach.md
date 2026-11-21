@@ -31,6 +31,16 @@ Where an endpoint is set, each process posts its spans there over OTLP/HTTP. A s
 
 So the collector the endpoint names sees which saved links a user fetched, though not the pages' text, and not a column's value.
 
+The SPA carries the browser SDK, started by `frontend/src/utils/telemetry.ts`. Where the build set `VITE_OTEL_ENDPOINT`, the browser posts its spans and log records there over OTLP/HTTP, with `VITE_OTEL_INGEST_TOKEN` as a bearer token. Where it was unset, nothing leaves the browser. A browser span or record carries:
+
+- each API request's method and full URL, query string included
+- the route each navigation reached and the path it left
+- every field a `createLogger` call logs, at every level, debug included
+- the URL and timing of every resource the page loaded
+- the browser's user agent and language, and a random id per tab
+
+The token ships inside the bundle every visitor downloads, so it is no secret. It keeps drive-by posts off the endpoint.
+
 ## curl_cffi
 
 `curl_cffi` makes every third-party page request, from `services/outbound_http.py`. It reaches whatever URL a user saved, as any HTTP client would, and carries nothing but the request.
