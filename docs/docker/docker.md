@@ -84,10 +84,20 @@ against. So a fault in the SPA fallback, or anywhere else in
 
 Production never builds on the server. `.github/workflows/release.yml` builds
 both images on a matrix: the root `Dockerfile` at `--target production`, and
-`frontend/Dockerfile` with `VITE_API_URL=/api`. It pushes them to GHCR tagged
-`sha-<commit>` and `latest`. `docker-compose.app.yml` names those images and has
-no `build` section at all. So the deploy pulls a tested artifact rather than
+`frontend/Dockerfile`, whose `VITE_API_URL` defaults to `/api/v1`. It pushes
+them to GHCR tagged `latest`, `sha-<7>` and `sha-<12>`, the commit's first seven
+and twelve characters. `docker-compose.app.yml` names those images and has no
+`build` section at all. So the deploy pulls a tested artifact rather than
 compiling one next to a live database.
+
+A release's version is `sha-<12>`. Under it the release also pushes its deploy
+directory with ORAS, as `ghcr.io/datapointchris/life/deploy`. That directory
+holds every file `scripts/deploy-homelab.sh` reads, at its path in the repo,
+and its `docker-compose.app.yml` names each image by digest rather than
+`latest`. `release/push-deploy-directory` renders and pushes it. A version
+already published is never replaced, and a re-run of a release builds and
+pushes nothing new. The package is public, so
+`oras pull ghcr.io/datapointchris/life/deploy:sha-<12>` needs no login.
 
 Dev and test mount `.:/app` over the image's own copy, so the code that runs is
 the code on disk. Both also mount `/app/.venv` as an anonymous volume, which

@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# Publishes the deploy directory: the files scripts/deploy-homelab.sh runs from, its app compose file naming each image this release pushed, by digest.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: push-deploy-directory --registry <host>/<namespace> --version <version>
+         --revision <sha> --source <url> [--plain-http]
+
+Copies every file scripts/deploy-homelab.sh reads, as the commit <revision>
+holds it, into a directory named deploy, at its path in the repo. In
+docker-compose.app.yml there, the image line naming <image>:latest names
+<registry>/<image>@<digest> instead, for life and life-vue, where <digest> is
+what <registry>/<image>:<version> resolves to. Pushes that directory with ORAS
+as <registry>/life/deploy:<version>, then pulls the tag back and fails unless
+it holds the same files, byte for byte, executable where the render's are.
+
+A published version is never replaced. Where <version> is already published,
+it pushes nothing, and fails unless the published directory is the one
+rendered. Each file takes the mode git records, and every entry the commit's
+time, so one commit renders the same layer on any machine. The manifest's
+created annotation is the commit's time too.
+
+ORAS reads its login from Docker's config, as `oras login` or `docker login`
+writes it, and must be on PATH. --plain-http is for a registry served over
+plain HTTP. In an Actions step, the outputs are deploy, life and life-vue, each
+a reference by digest.
+EOF
+}
+
+die() {
+  printf 'push-deploy-directory: %s\n' "$*" >&2
+  exit 1
+}
+
+usage_error() {
+  printf 'push-deploy-directory: %s\n\n' "$1" >&2
+  usage >&2
+  exit 2
+}
+
+# A line on stdout, and in the Actions run's summary when there is one.
+report() {
+  echo "$1"
+  [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "$1" >>"$GITHUB_STEP_SUMMARY"
+}
+
+output() {
+  [ -z "${GITHUB_OUTPUT:-}" ] || echo "$1=$2" >>"$GITHUB_OUTPUT"
+}
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 0
+fi
+
+registry='' version='' revision='' source='' plain_http=false
+while [ $# -gt 0 ]; do
+  case $1 in
+    --registry | --version | --revision | --source)
+      [ $# -ge 2 ] || usage_error "$1 needs a value"
+      printf -v "${1#--}" '%s' "$2"
+      shift 2
+      ;;
+    --plain-http)
+      plain_http=true
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *) usage_error "unknown argument $1" ;;
+  esac
+done
+
+for name in registry version revision source; do
+  [ -n "${!name}" ] || usage_error "--$name is required"
+done
+command -v oras >/dev/null || die "oras is not on PATH"
+
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+git -C "$repo" rev-parse --quiet --verify "$revision^{commit}" >/dev/null || die "$revision is not a commit in $repo"
+
+# What the deploy script reads, runs or sources, and what those read in turn. A
+# directory stands for every file git tracks under it, because Traefik reads the
+# whole of deploy-containers/traefik/dynamic/prod through the infra compose file's mount.
+deploy_paths=(
+  docker-compose.app.yml
+  docker-compose.infra.yml
+  deploy-containers/traefik/dynamic/prod
+  life/database/roles.sql
+  scripts/bash-lib/logging.sh
+  scripts/converge-database-roles.psql
+  scripts/converge-database-roles.sh
+  scripts/deploy-homelab.sh
+  scripts/generate-services-yml.sh
+  secrets/secrets.postgres-roles.prod.enc.env
+  secrets/secrets.prod.enc.env
+)
+images=(life life-vue)
+deploy=$registry/life/deploy
+remote=()
+[ "$plain_http" = false ] || remote+=(--plain-http)
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+tree=$work/rendered/deploy
+mkdir -p "$tree" "$work/pulled"
+
+for path in "${deploy_paths[@]}"; do
+  listed=$(git -C "$repo" ls-tree -r --format='%(objectmode) %(objectname) %(path)' "$revision" -- "$path")
+  [ -n "$listed" ] || die "$revision holds no $path, so the deploy directory would lack it"
+  while read -r mode blob file; do
+    case $mode in
+      100755) permissions=0755 ;;
+      100644) permissions=0644 ;;
+      *) die "$file is mode $mode in $revision, not a regular file" ;;
+    esac
+    mkdir -p "$tree/$(dirname "$file")"
+    git -C "$repo" cat-file blob "$blob" >"$tree/$file"
+    chmod "$permissions" "$tree/$file"
+  done <<<"$listed"
+done
+
+compose=$tree/docker-compose.app.yml
+for image in "${images[@]}"; do
+  reference=$registry/$image:$version
+  digest=$(oras resolve "${remote[@]}" "$reference") || die "$reference does not resolve"
+  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "$reference resolved to '$digest', which is not a sha256 digest"
+  pattern="^([[:space:]]+image: )[^[:space:]]+/$image:latest\$"
+  count=$(grep -cE "$pattern" "$compose" || true)
+  [ "$count" -eq 1 ] || die "docker-compose.app.yml names $image:latest on $count image lines, not one"
+  sed -i -E "s|$pattern|\1$registry/$image@$digest|" "$compose"
+  report "Names \`$registry/$image@$digest\`"
+  output "$image" "$registry/$image@$digest"
+done
+
+# Set last, because writing a file moves its directory's time.
+epoch=$(git -C "$repo" log -1 --format=%ct "$revision")
+find "$tree" -type d -exec chmod 0755 {} +
+find "$tree" -exec touch -h -d "@$epoch" {} +
+
+# Each entry's kind and path, a file's kind saying whether it is executable.
+tree_listing() {
+  (cd "$1" && find . -mindepth 1 \
+    \( -type d -printf 'directory %P\n' \) \
+    -o \( -type f -perm -u=x -printf 'executable %P\n' \) \
+    -o \( -type f -printf 'file %P\n' \) \
+    -o -printf 'other %P\n') | LC_ALL=C sort
+}
+
+same_tree() {
+  [ "$(tree_listing "$1")" = "$(tree_listing "$2")" ] && diff -r -q "$1" "$2" >/dev/null
+}
+
+# A published version is never replaced, so a re-run reads what the first run pushed and
+# accepts it only where it holds this render. Only "not found" pushes, so a registry error
+# never pushes a published version anew.
+if published=$(oras resolve "${remote[@]}" "$deploy:$version" 2>"$work/resolve.err"); then
+  mkdir "$work/published"
+  oras pull "${remote[@]}" --no-tty -o "$work/published" "$deploy@$published" >/dev/null \
+    || die "pulling the published $deploy@$published failed"
+  same_tree "$work/rendered" "$work/published" \
+    || die "$deploy:$version is already published as $published with other bytes, and a published version is never replaced"
+  report "\`$deploy:$version\` was already published as \`$deploy@$published\`, holding this render, so nothing was pushed"
+  pushed=$published
+elif grep -qF "$deploy:$version: not found" "$work/resolve.err"; then
+  created=$(TZ=UTC git -C "$repo" log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ "$revision")
+  pushed=$(cd "$work/rendered" && oras push "${remote[@]}" --no-tty \
+    --artifact-type application/vnd.life.deploy-directory.v1 \
+    --annotation "org.opencontainers.image.created=$created" \
+    --annotation "org.opencontainers.image.description=The files life's blue/green deploy runs from, naming this release's images by digest" \
+    --annotation "org.opencontainers.image.revision=$revision" \
+    --annotation "org.opencontainers.image.source=$source" \
+    --annotation "org.opencontainers.image.version=$version" \
+    --format go-template='{{.digest}}' \
+    "$deploy:$version" deploy) || die "pushing $deploy:$version failed"
+else
+  cat "$work/resolve.err" >&2
+  die "could not read whether $deploy:$version is published"
+fi
+[[ $pushed =~ ^sha256:[0-9a-f]{64}$ ]] || die "oras answered '$pushed' rather than a digest"
+
+tagged=$(oras resolve "${remote[@]}" "$deploy:$version") || die "$deploy:$version does not resolve after the push"
+[ "$tagged" = "$pushed" ] || die "$deploy:$version resolves to $tagged, not the $pushed just pushed"
+oras pull "${remote[@]}" --no-tty -o "$work/pulled" "$deploy:$version" >/dev/null || die "pulling $deploy:$version back failed"
+same_tree "$work/rendered" "$work/pulled" || die "$deploy:$version serves a deploy directory other than the one rendered"
+
+report "\`$deploy:$version\` is \`$deploy@$pushed\` and pulls back identical. It holds:"
+while read -r kind file; do
+  report "- \`$file\`, $kind, sha256 $(sha256sum "$work/pulled/deploy/$file" | cut -d' ' -f1)"
+done < <(tree_listing "$work/pulled/deploy" | grep -v '^directory ' | LC_ALL=C sort -k2)
+output deploy "$deploy@$pushed"

@@ -50,6 +50,10 @@ jobs:
   #
   # The receiver deploys only when the finished workflow's path is this file's,
   # so renaming this file stops every deploy until the receiver names the new one.
+  #
+  # Each image carries the release's version, sha-<first 12 characters of the
+  # commit>, which the deploy directory shares. A version already published is
+  # never built again, so one version names one image.
   images:
     name: Build & Push Image — ${{ matrix.image }}
     runs-on: ubuntu-26.04
@@ -57,6 +61,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +77,9 @@ jobs:
             otel_endpoint: https://otel.ichrisbirch.com
     steps:
       - uses: actions/checkout@v7
+      - name: Name the release by its commit
+        id: version
+        run: echo "version=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
       # SHA-pinned because they are third-party and the major tag moves. The
       # login action below is handed a token with packages: write.
       - name: Set up Docker Buildx
@@ -81,20 +90,41 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Two tags a build. `:latest` is what the compose file on the host names.
-      # `:sha-<short>` never moves, so a manifest can name a version rather
-      # than a moment, and a rollback is a manifest edit.
+      # A published version keeps its image, so a re-run renders the deploy
+      # directory the first run did. Only "not found" builds, so a registry
+      # error never pushes a published version anew.
+      - name: Find this version's image if it is already published
+        id: published
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
+        run: |
+          if manifest=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' 2> "$RUNNER_TEMP/inspect.err"); then
+            digest=$(jq -er .digest <<< "$manifest")
+            echo "::notice::$IMAGE is already published as $digest, so this leg builds nothing"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          elif grep -q ': not found$' "$RUNNER_TEMP/inspect.err"; then
+            echo "digest=" >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/inspect.err" >&2
+            exit 1
+          fi
+      # Three tags a build. `:latest` is what the compose file in the repo
+      # names. `:sha-<7>` and `:sha-<12>` never move, so a manifest can name a
+      # version rather than a moment. `:sha-<12>` is the release's version,
+      # which the deploy directory names by digest.
       - name: Extract metadata
         id: meta
+        if: steps.published.outputs.digest == ''
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.image }}
           tags: |
             type=sha,prefix=sha-,format=short
+            type=raw,value=${{ steps.version.outputs.version }}
             type=raw,value=latest
       # Without the token the gateway refuses every post, and the exporters drop the refusal in the browser.
       - name: Refuse an SPA build with no ingest token
-        if: matrix.otel_endpoint
+        if: matrix.otel_endpoint && steps.published.outputs.digest == ''
         env:
           OTEL_INGEST_TOKEN: ${{ secrets.OTEL_INGEST_TOKEN }}
         run: |
@@ -103,6 +133,8 @@ jobs:
             exit 1
           fi
       - name: Build and push
+        id: build
+        if: steps.published.outputs.digest == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -117,6 +149,69 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      # The deploy directory reads the digest from the tag, so the tag has to
+      # name what this job built.
+      - name: Check that the version names this build
+        if: steps.published.outputs.digest == ''
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILT: ${{ steps.build.outputs.digest }}
+        run: |
+          tagged=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -er .digest)
+          if [ "$tagged" != "$BUILT" ]; then
+            echo "::error::$IMAGE:$VERSION is $tagged, not the $BUILT this job built"
+            exit 1
+          fi
+          echo "Pushed \`$IMAGE:$VERSION\` as \`$IMAGE@$BUILT\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # The files scripts/deploy-homelab.sh runs from, docker-compose.app.yml in
+  # them naming each image above by digest, pushed beside the images as
+  # ghcr.io/<owner>/life/deploy under the same version. Its push is read back,
+  # and the job fails unless ghcr.io serves the directory rendered.
+  #
+  # A deploy that waits on this job names it, so renaming it moves that gate.
+  # ghcr.io links the package to this repo through the push's
+  # org.opencontainers.image.source annotation, and a linked package takes the
+  # repo's visibility, so an anonymous pull reads it.
+  deploy-directory:
+    name: Push the deploy directory
+    needs: images
+    runs-on: ubuntu-26.04
+    # A stalled registry fails the job here rather than at Actions' six-hour default.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned by version and by the SHA-256 its release publishes for the
+      # linux asset. A bump edits both.
+      - name: Install ORAS
+        env:
+          ORAS_VERSION: 1.4.0
+          ORAS_SHA256: d8e1dce2fd8ce996f1d901845b688eb0cf505a6082897606f053825bb47935d1
+        run: |
+          curl -fsSL --retry 5 --retry-delay 20 -o "$RUNNER_TEMP/oras.tar.gz" \
+            "https://github.com/oras-project/oras/releases/download/v$ORAS_VERSION/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          echo "$ORAS_SHA256  $RUNNER_TEMP/oras.tar.gz" | sha256sum -c --quiet -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/oras.tar.gz" -C "$RUNNER_TEMP/bin" oras
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # The token reaches ORAS on stdin, never an argv.
+      - name: Log in to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: oras login "$REGISTRY" --username "$GITHUB_ACTOR" --password-stdin <<< "$GITHUB_TOKEN"
+
+      - name: Push the deploy directory and read it back
+        env:
+          VERSION: ${{ needs.images.outputs.version }}
+        run: |
+          release/push-deploy-directory --registry "$REGISTRY/$OWNER" --version "$VERSION" \
+            --revision "$GITHUB_SHA" --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
 
   # The Go CLI is a nested module with its own version, tagged `cli/v1.2.3`
   # rather than a bare `v*`, so it cannot collide with the app's tag namespace.
