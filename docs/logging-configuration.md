@@ -106,6 +106,8 @@ A bulk article import stores the enqueuing request's `traceparent` and `baggage`
 
 Every other `OTEL_*` variable the SDK reads still applies, and overrides the distro's defaults.
 
+Each span's resource also names the process that made it: `process.pid`, its command line, `host.name` (the container) and a `service.instance.id` drawn fresh per process. uvicorn's workers share one service name, so these are what tell one worker's spans from another's.
+
 ### Scheduler Job Correlation
 
 Scheduler jobs are not request-scoped, so they get their own correlation token.

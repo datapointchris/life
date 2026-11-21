@@ -19,6 +19,7 @@ from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISA
 from opentelemetry.processor.baggage import ALLOW_ALL_BAGGAGE_KEYS
 from opentelemetry.processor.baggage import BaggageSpanProcessor
 from opentelemetry.sdk._configuration import _OTelSDKConfigurator
+from opentelemetry.sdk.environment_variables import OTEL_EXPERIMENTAL_RESOURCE_DETECTORS
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_ENDPOINT
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_PROTOCOL
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
@@ -28,6 +29,7 @@ from opentelemetry.sdk.trace import SpanProcessor
 # The container healthcheck calls it every thirty seconds, and its span would
 # name neither a caller nor any work. A pattern is searched for in the full URL.
 UNTRACED_URLS = '/health$'
+RESOURCE_DETECTORS = 'otel,host,process,service_instance'
 
 
 def endpoint_named() -> bool:
@@ -63,6 +65,9 @@ class Distro(BaseDistro):
         os.environ.setdefault(OTEL_LOGS_EXPORTER, 'none')
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, 'http/protobuf')
         os.environ.setdefault('OTEL_PYTHON_FASTAPI_EXCLUDED_URLS', UNTRACED_URLS)
+        # uvicorn's workers share one service name, so only the process, its
+        # container and a per-process instance id tell a span's worker apart.
+        os.environ.setdefault(OTEL_EXPERIMENTAL_RESOURCE_DETECTORS, RESOURCE_DETECTORS)
 
 
 class Configurator(_OTelSDKConfigurator):

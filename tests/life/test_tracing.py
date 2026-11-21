@@ -213,3 +213,5 @@ def test_with_an_endpoint_named_spans_leave_over_otlp_http_carrying_the_baggage(
     request = ExportTraceServiceRequest.FromString(body)
     (span,) = [span for resource in request.resource_spans for scope in resource.scope_spans for span in scope.spans]
     assert {a.key: a.value.string_value for a in span.attributes} == {'caller.flow.id': FLOW_ID}
+    (resource,) = [resource.resource for resource in request.resource_spans]
+    assert {'process.pid', 'host.name', 'service.instance.id'} <= {a.key for a in resource.attributes}

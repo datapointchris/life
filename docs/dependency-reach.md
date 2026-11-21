@@ -27,6 +27,7 @@ Where an endpoint is set, each process posts its spans there over OTLP/HTTP. A s
 - each Redis command's name, with every argument replaced by `?`
 - the full URL of every page `get_page` fetches, and the URL it was redirected to
 - every member of the baggage the caller sent, copied onto each span in that request
+- the process that made it: its pid, its command line and the container's hostname
 
 So the collector the endpoint names sees which saved links a user fetched, though not the pages' text, and not a column's value.
 
