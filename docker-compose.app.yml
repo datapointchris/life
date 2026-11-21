@@ -26,8 +26,14 @@ services:
   api:
     <<: *app-image
     container_name: life-${DEPLOY_COLOR}-api
-    command: uvicorn life.wsgi_api:api --host 0.0.0.0 --port 8000 --workers 4 --no-access-log
+    # Each uvicorn worker is a fresh interpreter that runs the launcher's
+    # sitecustomize again, so every worker installs and flushes its own tracer.
+    command: opentelemetry-instrument uvicorn life.wsgi_api:api --host 0.0.0.0 --port 8000 --workers 4 --no-access-log
     env_file: .env
+    # The host's OpenTelemetry collector takes OTLP on the Docker bridge's
+    # address, which host-gateway names.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     environment:
       - ENVIRONMENT=production
       - DEPLOY_COLOR=${DEPLOY_COLOR}
@@ -38,6 +44,9 @@ services:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_COLORS=${LOG_COLORS:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318
+      - OTEL_SERVICE_NAME=life-api
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production,life.deploy.color=${DEPLOY_COLOR}
     ports: []
     restart: always
     healthcheck:
@@ -91,13 +100,18 @@ services:
     container_name: life-${DEPLOY_COLOR}-scheduler
     depends_on:
       - api
-    command: python -m life.wsgi_scheduler
+    command: opentelemetry-instrument python -m life.wsgi_scheduler
     env_file: .env
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     environment:
       - ENVIRONMENT=production
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_COLORS=${LOG_COLORS:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318
+      - OTEL_SERVICE_NAME=life-scheduler
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production,life.deploy.color=${DEPLOY_COLOR}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: always

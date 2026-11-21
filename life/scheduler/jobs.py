@@ -22,6 +22,8 @@ from zoneinfo import ZoneInfo
 import pendulum
 import structlog
 from apscheduler.triggers.cron import CronTrigger
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 from sqlalchemy import inspect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +36,7 @@ from life.services.task_queue import new_task
 from life.util import find_project_root
 
 logger = structlog.get_logger()
+tracer = trace.get_tracer(__name__)
 
 
 def first_admin_user(session: Session) -> models.User | None:
@@ -102,9 +105,10 @@ def persist_job_run(
 
 
 def job_logger(func: Callable) -> Callable:
-    """Decorator that wraps each job invocation with structured logging.
+    """Decorator that wraps each job invocation in a span and structured logging.
 
-    Binds a per-invocation `job_run_id` into contextvars so every log
+    The span is named for the job and carries `job.run_id`. Binds the same
+    per-invocation `job_run_id` into contextvars so every log
     statement the job emits downstream inherits it. This lets operators
     trace a single execution across the full job using Grafana's
     `{job_run_id="..."}` label query.
@@ -117,42 +121,50 @@ def job_logger(func: Callable) -> Callable:
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         job_run_id = uuid.uuid4().hex[:8]
-        structlog.contextvars.bind_contextvars(job_name=func.__name__, job_run_id=job_run_id)
-        logger.info('job_started')
-        started_at = pendulum.now()
-        success = False
-        error_type = None
-        error_message = None
-        try:
-            func(*args, **kwargs)
-            success = True
-            elapsed = (pendulum.now() - started_at).in_words()
-            logger.info('job_completed', elapsed=elapsed)
-        except Exception as e:
-            elapsed = (pendulum.now() - started_at).in_words()
-            error_type = type(e).__name__
-            error_message = str(e)
-            logger.error('job_failed', elapsed=elapsed, error_type=error_type, error=error_message)
-        finally:
-            finished_at = pendulum.now()
-            duration_seconds = (finished_at - started_at).total_seconds()
-            # settings is always the first positional arg to every job function
-            settings = args[0] if args else kwargs.get('settings')
-            if settings:
-                persist_job_run(
-                    settings=settings,
-                    job_id=func.__name__,
-                    job_run_id=job_run_id,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    duration_seconds=duration_seconds,
-                    success=success,
-                    error_type=error_type,
-                    error_message=error_message,
-                )
-            structlog.contextvars.unbind_contextvars('job_name', 'job_run_id')
+        with tracer.start_as_current_span(func.__name__, attributes={'job.run_id': job_run_id}) as span:
+            run_traced_job(func, span, job_run_id, *args, **kwargs)
 
     return wrapper
+
+
+def run_traced_job(func: Callable, span: trace.Span, job_run_id: str, *args, **kwargs) -> None:
+    """Run one job inside its span, logging and persisting the run, and mark the span failed when the job raises."""
+    structlog.contextvars.bind_contextvars(job_name=func.__name__, job_run_id=job_run_id)
+    logger.info('job_started')
+    started_at = pendulum.now()
+    success = False
+    error_type = None
+    error_message = None
+    try:
+        func(*args, **kwargs)
+        success = True
+        elapsed = (pendulum.now() - started_at).in_words()
+        logger.info('job_completed', elapsed=elapsed)
+    except Exception as e:
+        elapsed = (pendulum.now() - started_at).in_words()
+        error_type = type(e).__name__
+        error_message = str(e)
+        logger.error('job_failed', elapsed=elapsed, error_type=error_type, error=error_message)
+        span.record_exception(e)
+        span.set_status(StatusCode.ERROR, error_message)
+    finally:
+        finished_at = pendulum.now()
+        duration_seconds = (finished_at - started_at).total_seconds()
+        # settings is always the first positional arg to every job function
+        settings = args[0] if args else kwargs.get('settings')
+        if settings:
+            persist_job_run(
+                settings=settings,
+                job_id=func.__name__,
+                job_run_id=job_run_id,
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_seconds=duration_seconds,
+                success=success,
+                error_type=error_type,
+                error_message=error_message,
+            )
+        structlog.contextvars.unbind_contextvars('job_name', 'job_run_id')
 
 
 @job_logger

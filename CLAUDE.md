@@ -72,7 +72,8 @@ The mapping passes `StateDir` explicitly rather than taking goclilogin's default
 Fetching a page from a third party is `get_page` in
 `life/services/outbound_http.py`. It sends a real browser's TLS fingerprint
 through `curl_cffi`, follows redirects, applies a 60-second timeout and returns a
-`FetchedPage`. Sites behind bot protection refuse a plain HTTP client whatever user
+`FetchedPage`. It opens its own client span, because no OpenTelemetry
+instrumentation covers `curl_cffi`. Sites behind bot protection refuse a plain HTTP client whatever user
 agent it claims. Never fetch an outside URL any other way; add the case to
 `get_page` instead.
 
@@ -304,6 +305,7 @@ Unit tests mock the API with `vi.mock`; E2E runs through `app.test.localhost`, n
 Python logs through structlog into the stdlib root logger, which writes to stderr alone.
 Docker's logging driver keeps that output, and Grafana Alloy ships it to Loki.
 `LOG_FORMAT` (`console`/`json`), `LOG_LEVEL` and `LOG_COLORS` configure the logger.
-Requests are traced by `X-Request-ID`.
+A request's `request_id` is its trace ID, echoed as `X-Request-ID`, and every line written inside a span carries `trace_id` and `span_id`.
+The API and the scheduler start under `opentelemetry-instrument` in production, which loads `life/opentelemetry_distro.py` through this package's entry points. A process with no `OTEL_EXPORTER_OTLP_ENDPOINT` instruments nothing and exports nothing. `docs/logging-configuration.md` § "Traces" has the variables.
 Vue logs through consola via `createLogger('ModuleName')`, in structlog's key=value shape, and as JSON for Loki in production.
 `./ops/lifeops {dev,testing} logs [service]` reads a running environment's logs.

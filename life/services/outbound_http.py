@@ -13,9 +13,15 @@ identity provider with its own user agent and its own caller-supplied timeout.
 """
 
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from curl_cffi import requests as curl_requests
 from curl_cffi.requests.exceptions import RequestException
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
+from opentelemetry.trace import StatusCode
+
+tracer = trace.get_tracer(__name__)
 
 # Long, because the callers are fetching arbitrary pages a person asked to save
 # and a slow site is a normal outcome rather than a fault. A saved link can be a
@@ -68,8 +74,23 @@ def get_page(url: str, timeout: float = DEFAULT_TIMEOUT) -> FetchedPage:
     an error calls `.raise_for_status()`, and one that inspects the status still
     can. Only a request that never got an answer raises here.
     """
-    try:
-        response = curl_requests.get(url, impersonate=BROWSER_FINGERPRINT, timeout=timeout, allow_redirects=True)
-    except RequestException as e:
-        raise PageFetchError(url, str(e)) from e
-    return FetchedPage(requested_url=url, url=str(response.url), status_code=response.status_code, content=response.content)
+    attributes = {'http.request.method': 'GET', 'url.full': url, 'server.address': urlsplit(url).hostname or ''}
+    # A client span by hand, because no OpenTelemetry instrumentation covers curl_cffi.
+    with tracer.start_as_current_span('GET', kind=SpanKind.CLIENT, attributes=attributes) as span:
+        try:
+            response = curl_requests.get(url, impersonate=BROWSER_FINGERPRINT, timeout=timeout, allow_redirects=True)
+        except RequestException as e:
+            span.set_attribute('error.type', type(e).__name__)
+            raise PageFetchError(url, str(e)) from e
+        page = FetchedPage(requested_url=url, url=str(response.url), status_code=response.status_code, content=response.content)
+        span.set_attributes(
+            {
+                'http.response.status_code': page.status_code,
+                'http.response.body.size': len(page.content),
+                'life.page.final_url': page.url,
+            }
+        )
+        if page.status_code >= 400:
+            span.set_attribute('error.type', str(page.status_code))
+            span.set_status(StatusCode.ERROR)
+    return page

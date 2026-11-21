@@ -67,12 +67,31 @@ dependencies = [
   "rich>=14.1.0",
   "Markdown>=3.6",
   "claude-agent-sdk>=0.2.154",
+  # Traces. `opentelemetry-instrument` comes with opentelemetry-instrumentation
+  # and loads the distro this package registers below, rather than
+  # opentelemetry-distro's, whose defaults export every signal over gRPC
+  # whether or not an endpoint is named. The instrumentations load by entry
+  # point, so nothing imports them.
+  "opentelemetry-api>=1.45.2",
+  "opentelemetry-exporter-otlp-proto-http>=1.45.2",
+  "opentelemetry-instrumentation>=0.66b2",
+  "opentelemetry-instrumentation-fastapi>=0.66b2",
+  "opentelemetry-instrumentation-redis>=0.66b2",
+  "opentelemetry-instrumentation-sqlalchemy>=0.66b2",
+  "opentelemetry-processor-baggage>=0.66b2",
+  "opentelemetry-sdk>=1.45.2",
 ]
 
 [project.urls]
 Homepage = "https://www.ichrisbirch.com"
 Documentation = "https://docs.ichrisbirch.com"
 Repository = "https://github.com/datapointchris/life"
+
+[project.entry-points.opentelemetry_distro]
+life = "life.opentelemetry_distro:Distro"
+
+[project.entry-points.opentelemetry_configurator]
+life = "life.opentelemetry_distro:Configurator"
 
 [project.entry-points."mkdocs.plugins"]
 code_sync = "mkdocs_plugins.code_sync.plugin:CodeSyncPlugin"
@@ -194,6 +213,12 @@ ignore_missing_imports = true
 check_untyped_defs = true
 warn_return_any = false
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# It opens with a file-level `# type: ignore`, so mypy reads it as empty and
+# finds no BaseDistro. Skipping it types what it exports as Any.
+module = ["opentelemetry.instrumentation.distro"]
+follow_imports = "skip"
 
 # `standard` replaces the per-rule opt-outs repos used to accumulate; basedpyright
 # defaults to `recommended`, which turns every one of them back on. Named

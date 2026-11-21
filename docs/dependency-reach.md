@@ -16,6 +16,20 @@ The CLI inherits the API process's whole environment, which is the decrypted `.e
 
 `testcontainers` is a *test* dependency, used only by `PrivateServices` in `tests/environment.py`. It reaches the Docker daemon through the same socket the `docker` client uses, so a pytest process holds the root-equivalent handle a developer's own shell already has. Each session starts three containers: the Postgres and Redis images production runs, read from `docker-compose.yml`, and the `testcontainers/ryuk` reaper. Ryuk mounts the daemon socket read-write, so it can remove the session's containers when the session dies. It is unprivileged unless `TESTCONTAINERS_RYUK_PRIVILEGED` says otherwise. Nothing from the app's `.env` reaches any of the three: the database runs with fixed test credentials, and Redis without a password.
 
+## OpenTelemetry
+
+The API and the scheduler start under `opentelemetry-instrument`, which patches FastAPI, SQLAlchemy and Redis before the app imports them. `life/opentelemetry_distro.py` is the distro it loads. Where `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, it disables the SDK and patches nothing, so no span is made and nothing leaves.
+
+Where an endpoint is set, each process posts its spans there over OTLP/HTTP. A span carries:
+
+- the request's method, route and full path, path parameters included
+- each SQL statement's text, without its bound values
+- each Redis command's name, with every argument replaced by `?`
+- the full URL of every page `get_page` fetches, and the URL it was redirected to
+- every member of the baggage the caller sent, copied onto each span in that request
+
+So the collector the endpoint names sees which saved links a user fetched, though not the pages' text, and not a column's value.
+
 ## curl_cffi
 
 `curl_cffi` makes every third-party page request, from `services/outbound_http.py`. It reaches whatever URL a user saved, as any HTTP client would, and carries nothing but the request.

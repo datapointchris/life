@@ -65,49 +65,55 @@ Controls whether colored output is used in console format.
 
 ## Request Tracing
 
-All services support request tracing via the `X-Request-ID` header. When a request arrives, middleware generates or extracts a request ID and binds it to structlog's context variables. All subsequent log messages include this ID, enabling correlation across services.
+Every request's log lines carry a `request_id`. Every line written inside a span also carries `trace_id` and `span_id`, added by `add_trace_context` in `life/logger.py`, so a line leads to its trace and a trace to its lines.
 
 ### Request ID Flow
 
+The request ID is the trace ID wherever the request runs in a trace. `life/api/middleware.py` picks the first of these that exists:
+
+1. the trace ID of the span the API is recording for the request
+2. the trace ID of the caller's W3C `traceparent` header, when the API records no span
+3. the caller's `X-Request-ID` header
+4. eight fresh hex characters
+
+The response echoes the result as `X-Request-ID`. Where the API recorded a span, it also returns `traceparent`, naming that span. The Vue client mints its own `X-Request-ID` per request. Where that differs from the trace ID, the API logs it beside as `client_request_id`, so the browser's console line still finds the server's.
+
 ```text
-Vue SPA (browser)                       FastAPI Process
-─────────────────                       ─────────────────
-1. Vue API client generates
-   X-Request-ID: abc12345 per request
-   (frontend/src/api/client.ts)
-              │
-              └──── HTTP Request ────► 2. Middleware extracts request_id
-                                          (or generates one if missing)
-                                       3. bind_contextvars(request_id)
-                                       4. All FastAPI logs include request_id
-                                       5. Header echoed on the response
-   ◀── X-Request-ID: abc12345 ────────────────────────
-6. Vue captures response header
-   into ApiError for surfacing in UI
+caller (CLI, job, SPA)                 FastAPI process
+──────────────────────                 ───────────────
+traceparent: 00-<trace>-<span>-01
+baggage: <member>=<value>
+X-Request-ID: abc12345 (SPA only)
+          │
+          └──── HTTP request ────────► server span, child of <span> in <trace>
+                                       every baggage member copied onto each span
+                                       bind_contextvars(request_id=<trace>,
+                                                        client_request_id=abc12345)
+◀── X-Request-ID: <trace>, traceparent: 00-<trace>-<server span>-01
 ```
 
-### Middleware Implementation
+### Traces
 
-**FastAPI**: `life/api/middleware.py`
+The API and the scheduler start under `opentelemetry-instrument`, which loads the distro in `life/opentelemetry_distro.py`. Where `OTEL_EXPORTER_OTLP_ENDPOINT` names a collector, each process exports its spans there over OTLP/HTTP: the request's route, its SQL and Redis calls, and each page `get_page` fetches. Where none is named, nothing is instrumented and nothing is exported. `/health` is never traced.
 
-```python
-class RequestTracingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        structlog.contextvars.clear_contextvars()
-        request_id = request.headers.get('X-Request-ID', str(uuid.uuid4())[:8])
-        structlog.contextvars.bind_contextvars(request_id=request_id)
-        # ...
-```
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | The collector's OTLP/HTTP base URL. Unset turns tracing off. |
+| `OTEL_SERVICE_NAME` | `unknown_service` | The spans' `service.name`. Production sets `life-api` and `life-scheduler`. |
+| `OTEL_RESOURCE_ATTRIBUTES` | unset | Extra resource attributes. Production adds the environment and the deploy color. |
+
+Every other `OTEL_*` variable the SDK reads still applies, and overrides the distro's defaults.
 
 ### Scheduler Job Correlation
 
 Scheduler jobs are not request-scoped, so they get their own correlation token.
-The `@job_logger` decorator in `life/scheduler/jobs.py` generates a
-per-invocation `job_run_id` (8-hex), binds it into structlog contextvars for
-the lifetime of the job, and persists it on the `SchedulerJobRun` row written
-at the end. Every log line a job emits carries the `job_run_id`, so a single
-execution is queryable in Loki via `{job_run_id="..."}` and joins back to the
-DB record by the same id.
+The `@job_logger` decorator in `life/scheduler/jobs.py` opens a span named for
+the job, holding a per-invocation `job_run_id` (8-hex) as `job.run_id`. It binds
+the same id into structlog contextvars for the lifetime of the job, and
+persists it on the `SchedulerJobRun` row written at the end. Every log line a
+job emits carries the `job_run_id` and the span's `trace_id`, so a single
+execution is queryable in Loki via `{job_run_id="..."}`, and joins back to the
+DB record and the trace by the same ids.
 
 ## Viewing Logs
 
@@ -192,17 +198,19 @@ Docker manages log rotation. Configure in Docker daemon settings if needed:
 The structlog configuration includes:
 
 1. **Context variable merging**: Includes request_id and other bound context
-2. **Log level filtering**: Based on LOG_LEVEL environment variable
-3. **Timestamp**: ISO 8601 format (UTC)
-4. **Call site tracking**: Automatic filename, function name, and line number
-5. **Stack info rendering**: For exception tracebacks
-6. **Format rendering**: Console or JSON based on LOG_FORMAT
+2. **Trace context**: `trace_id` and `span_id` of the current span, on structlog and stdlib lines alike
+3. **Log level filtering**: Based on LOG_LEVEL environment variable
+4. **Timestamp**: ISO 8601 format (UTC)
+5. **Call site tracking**: Automatic filename, function name, and line number
+6. **Stack info rendering**: For exception tracebacks
+7. **Format rendering**: Console or JSON based on LOG_FORMAT
 
 ### Processor Chain
 
 ```python
 processors = [
     structlog.contextvars.merge_contextvars,      # Include request_id, etc.
+    add_trace_context,                            # Add trace_id, span_id inside a span
     structlog.processors.add_log_level,           # Add level field
     structlog.processors.TimeStamper(...),        # Add timestamp
     CallsiteParameterAdder({...}),                # Add filename, func, line
@@ -297,7 +305,7 @@ a container that Grafana Alloy can scrape.
 
 ### Vue Request Tracing
 
-The Vue API client (`frontend/src/api/client.ts`) adds `X-Request-ID` headers to every outgoing request via an Axios interceptor. This ID is logged in the browser console (consola) and on the server (structlog), enabling correlation when reading both sides simultaneously. No single query spans both, because the browser's half never leaves the browser.
+The Vue API client (`frontend/src/api/client.ts`) adds `X-Request-ID` headers to every outgoing request via an Axios interceptor. This ID is logged in the browser console (consola) and on the server (structlog), as `request_id` or, where the server traced the request, as `client_request_id`. That enables correlation when reading both sides simultaneously. No single query spans both, because the browser's half never leaves the browser.
 
 ### Log Level Control
 

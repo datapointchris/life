@@ -16,6 +16,7 @@ import os
 import sys
 
 import structlog
+from opentelemetry import trace
 from structlog.processors import CallsiteParameter
 from structlog.processors import CallsiteParameterAdder
 from structlog.typing import Processor
@@ -40,11 +41,21 @@ def use_colors() -> bool:
     return sys.stderr.isatty()
 
 
+def add_trace_context(logger, method_name, event_dict):
+    """Name the trace and span a line was written in, so a line leads to its trace and back."""
+    span_context = trace.get_current_span().get_span_context()
+    if span_context.is_valid:
+        event_dict['trace_id'] = trace.format_trace_id(span_context.trace_id)
+        event_dict['span_id'] = trace.format_span_id(span_context.span_id)
+    return event_dict
+
+
 def configure_structlog():
     """Render structlog and stdlib records through one root handler on stderr."""
     # Shared processors for both stdlib and structlog
     shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
+        add_trace_context,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt='%Y-%m-%dT%H:%M:%SZ'),
         CallsiteParameterAdder(
@@ -81,6 +92,7 @@ def configure_structlog():
     if LOG_FORMAT == 'json':
         formatter = structlog.stdlib.ProcessorFormatter(
             processor=structlog.processors.JSONRenderer(),
+            foreign_pre_chain=[add_trace_context],
         )
     else:
         formatter = structlog.stdlib.ProcessorFormatter(
@@ -88,6 +100,7 @@ def configure_structlog():
                 colors=use_colors(),
                 pad_level=True,
             ),
+            foreign_pre_chain=[add_trace_context],
         )
 
     for handler in logging.root.handlers:
