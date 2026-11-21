@@ -35,11 +35,11 @@ The SPA carries the browser SDK, started by `frontend/src/utils/telemetry.ts`. W
 
 - each API request's method and full URL, query string included
 - the route each navigation reached and the path it left
-- every field a `createLogger` call logs, at `info` and above in a production build
+- every field a `createLogger` call logs, at every level, debug included
 - the URL and timing of every resource the page loaded
 - the browser's user agent and language, and a random id per tab
 
-The token ships inside the bundle every visitor downloads, so it is no secret. It keeps drive-by posts off the endpoint, and the Collector's own limits do the rest.
+The token ships inside the bundle every visitor downloads, so it is no secret. It keeps drive-by posts off the endpoint.
 
 ## curl_cffi
 

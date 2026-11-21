@@ -110,9 +110,9 @@ Each span's resource also names the process that made it: `process.pid`, its com
 
 #### The browser's traces
 
-The SPA traces itself as `life-vue`, from `frontend/src/utils/telemetry.ts`. Its tracer always runs, so every API request carries a `traceparent`. Spans and log records leave the browser only where the build set `VITE_OTEL_ENDPOINT`, the base URL a Collector serves OTLP/HTTP at. `VITE_OTEL_INGEST_TOKEN`, where set, goes with each post as `Authorization: Bearer <token>`. The release workflow builds the production image with both.
+The SPA traces itself as `life-vue`, from `frontend/src/utils/telemetry.ts`. Its tracer always runs, so every API request carries a `traceparent`. Spans and log records leave the browser only where the build set `VITE_OTEL_ENDPOINT`, the base URL a Collector serves OTLP/HTTP at. `VITE_OTEL_INGEST_TOKEN`, where set, goes with each post as `Authorization: Bearer <token>`. `.github/workflows/release.yml` sets them for the production image.
 
-Each navigation is a root span named for the route it reached, and the first one starts when the browser began loading the page. The axios client in `frontend/src/api/client.ts` opens a client span for each API request under the navigation that is still settling, and the API continues that trace:
+Each navigation is a root span named for the route it reached, and the first one starts when the browser began loading the page. The axios client in `frontend/src/api/client.ts` opens a client span for each API request under the root span still open, and the API continues that trace:
 
 ```text
 navigation /countdowns                  (navigation.type=page_load)
@@ -125,7 +125,18 @@ navigation /countdowns                  (navigation.type=page_load)
     └── life-api server span → SQL
 ```
 
-A navigation's span ends a second after its last request answers, and after thirty seconds at most. A request made later, such as a click's, starts a trace of its own. A log record carries the trace of the request it describes, else of the latest navigation.
+A root span ends once its requests have answered and gone quiet, or at a hard limit. `ROOT_IDLE_MS` and `ROOT_LIMIT_MS` in `frontend/src/utils/telemetry.ts` set both. A navigation also waits for its route to resolve. Hiding or closing the tab ends the open root and posts it.
+
+A request made with no root open, such as a click's, opens a root of its own named `activity <route>`. Requests that start before that root goes quiet join it, so a create and the refetch after it share one trace:
+
+```text
+activity /countdowns
+├── POST /countdowns                    client span
+│   └── life-api server span → SQL
+└── countdown_created                   log record, written after the POST answered
+```
+
+A log record carries the trace of the span active when it was written, else of the latest root. So a store's line written after its request answers lands in that request's trace.
 
 #### The dev stack's Collector
 
@@ -323,21 +334,21 @@ logger.error('countdown_create_failed', { detail: error.detail, status: error.st
 
 ### Output
 
-Every build prints the key=value line, matching structlog's console format:
+The browser console prints the key=value line, matching structlog's console format:
 
 ```text
 2026-03-13T15:30:45.123Z [info   ] countdown_created              module=CountdownsStore id=42 name="Summer Trip"
 ```
 
-Where the build set `VITE_OTEL_ENDPOINT`, the same line also posts to it as a log record. The event is its body, `module` and each context field are its attributes, and its trace and span are the ones it was written in. A production build logs at `info` and above, and a dev build at `debug`.
+Where the build set `VITE_OTEL_ENDPOINT`, every line posts to it as a log record, whatever its level, and the Collector decides which it keeps. The event is its body, `module` and each context field are its attributes, and its trace and span are the ones it was written in.
 
 ### Vue Request Tracing
 
-The Vue API client (`frontend/src/api/client.ts`) opens a client span for every request and sends its `traceparent`. Its `request_outgoing`, `request_completed` and `request_failed` lines carry that trace ID as `request_id`, the same value the server logs as `request_id` and answers in `X-Request-ID`. So one trace ID finds the browser's span and log records and the server's spans and lines.
+The Vue API client (`frontend/src/api/client.ts`) opens a client span for every request and sends its `traceparent`. Each line it writes about a request carries that trace ID as `request_id`, the same value the server logs as `request_id` and answers in `X-Request-ID`. So one trace ID finds the browser's span and log records and the server's spans and lines.
 
 ### Log Level Control
 
-In development, you can change the log level at runtime via the browser console:
+The console prints `info` and above in a production build and `debug` in dev, from `consoleLevel` in `frontend/src/utils/logger.ts`. The level gates the console alone, so every level still posts. In development, change it at runtime from the browser console:
 
 ```javascript
 window.__setLogLevel('debug')  // Show all logs
