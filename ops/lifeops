@@ -297,7 +297,7 @@ function env-docker-config() {
       echo "Available: $($compose_cmd config --services 2>/dev/null | tr '\n' ' ')"
       return 1
     fi
-    $compose_cmd config 2>/dev/null | yq -y ".services.\"$service\""
+    $compose_cmd config "$service"
   fi
 }
 
