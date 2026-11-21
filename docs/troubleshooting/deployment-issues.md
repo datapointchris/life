@@ -45,9 +45,10 @@ order the script sets them, so each one greps the log directly.
 
 ```text
   on the host, before any color is touched
-    prerequisites ──► decrypt_secrets ──► git_pull
-                                              │
-  the new color                               ▼
+    prerequisites ──► decrypt_secrets
+                             │
+      ┌──────────────────────┘
+      ▼   the new color
     determine_colors ──► infra_startup ──► pull ──► start_containers
                                                           │
                                                           ▼
@@ -66,9 +67,8 @@ it runs against the same database the live color is using.
 
 ### It failed before choosing a color
 
-`prerequisites`, `decrypt_secrets` and `git_pull` run on the host before
-blue/green begins, so a failure here means nothing was deployed and nothing
-changed.
+`prerequisites` and `decrypt_secrets` run on the host before blue/green begins,
+so a failure here means nothing was deployed and nothing changed.
 
 `decrypt_secrets` exits for three reasons and names which in `FAILURE_OUTPUT`:
 `sops` is not installed, `secrets/secrets.prod.enc.env` is missing, or the
@@ -76,15 +76,16 @@ decrypt itself failed. The third means the age private key at
 `~/.config/sops/age/keys.txt` is absent or wrong, which is what a host rebuild
 leaves behind when the key was not copied across.
 
-`git_pull` exits when `git fetch origin main` or `git pull origin main` fails.
-A dirty checkout is the usual cause, and it means something edited a tracked
-file in `/srv/life/` by hand.
+The script reads no git. The deploy that runs it writes the release's deploy
+directory over the install directory first, so a file edited there by hand
+lasts until the next deploy.
 
 ### Images failed to pull
 
 Production does not build. `.github/workflows/release.yml` builds both images
 and pushes them to `ghcr.io/datapointchris/`, tagged `sha-<commit>` and
-`latest`. A pull failure means that workflow did not finish, or the host cannot
+`latest`, and `docker-compose.app.yml` in the deploy directory names each by
+digest. A pull failure means that workflow did not finish, or the host cannot
 reach GHCR.
 
 Check the workflow run before looking at the host. A red `Release` run is the

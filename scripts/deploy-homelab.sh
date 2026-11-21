@@ -7,12 +7,16 @@
 # before the switch, the live containers are never touched.
 #
 # Images are built by GHA (.github/workflows/release.yml) and pushed to
-# ghcr.io/datapointchris/{life,life-vue}:latest. This script
-# pulls them — it does not build locally.
+# ghcr.io/datapointchris/{life,life-vue}. docker-compose.app.yml names them, and
+# this script pulls them — it does not build locally.
+#
+# It deploys the directory it sits in, and reads no git. The release's deploy
+# directory holds every file it reads, and the deploy that runs it writes that
+# directory in place first. A checkout of the repo works the same way.
 #
 # Flow:
 #   1. Acquire deploy lock (prevents concurrent deploys)
-#   2. Pull latest code + decrypt secrets
+#   2. Decrypt secrets
 #   3. Determine which color to deploy (opposite of live)
 #   4. Ensure infrastructure (Traefik, PostgreSQL, Redis) is running
 #   5. Pull new images and start new color containers
@@ -22,14 +26,20 @@
 #   9. Grace period, then tear down old color
 #
 # Usage:
-#   ./scripts/deploy-homelab.sh
+#   DEPLOY_VERSION=<version> DEPLOY_REVISION=<commit> ./scripts/deploy-homelab.sh
+#
+# DEPLOY_VERSION names the release, such as sha-<first 12 of the commit>, and
+# DEPLOY_REVISION its commit. The log and the Slack message name each, and
+# `unknown` for one not set.
 
 set -euo pipefail
 
-INSTALL_DIR="/srv/life"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LOG_DIR="${INSTALL_DIR}/logs"
 LOG_FILE="${LOG_DIR}/deploy.log"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="${DEPLOY_VERSION:-unknown}"
+REVISION="${DEPLOY_REVISION:-unknown}"
 
 LOCK_FILE="/var/lock/life-deploy.lock"
 STATE_DIR="/var/lib/life"
@@ -46,8 +56,6 @@ source "${SCRIPT_DIR}/bash-lib/logging.sh"
 # Track deployment state for cleanup
 DEPLOY_STARTED=false
 DEPLOY_SUCCESS=false
-CURRENT_SHA=""
-NEW_SHA=""
 DEPLOY_START_TIME=""
 FAILURE_STEP=""
 FAILURE_OUTPUT=""
@@ -83,14 +91,11 @@ cleanup() {
   local exit_code=$?
 
   if [[ "$DEPLOY_STARTED" == "true" && "$DEPLOY_SUCCESS" != "true" ]]; then
-    local commit_msg
-    commit_msg=$(cd "$INSTALL_DIR" && git log -1 --pretty=format:'%h - %s' 2>/dev/null || echo "unknown")
-
     log_error "deployment_failed" \
       "exit_code" "$exit_code" \
       "step" "${FAILURE_STEP:-unknown}" \
-      "current_sha" "${CURRENT_SHA:-unknown}" \
-      "target_sha" "${NEW_SHA:-unknown}" \
+      "version" "$VERSION" \
+      "revision" "$REVISION" \
       "live_color" "${LIVE_COLOR:-unknown}" \
       "deploy_color" "${DEPLOY_COLOR:-unknown}" | tee -a "$LOG_FILE"
 
@@ -111,18 +116,18 @@ cleanup() {
       fi
     fi
 
-    local message="*Commit:* \`${NEW_SHA:0:7}\`"
+    local message="*Version:* \`${VERSION}\`"
+    message+="\n*Commit:* \`${REVISION}\`"
     message+="\n*Step Failed:* ${FAILURE_STEP:-unknown}"
     message+="\n*Exit Code:* $exit_code"
     message+="\n*Live Color:* ${LIVE_COLOR:-unknown} (${live_state})"
-    message+="\n\n*Commit:* $commit_msg"
 
     local context=""
     if [[ -n "$FAILURE_OUTPUT" ]]; then
       local truncated_output="${FAILURE_OUTPUT: -500}"
       context="*Error Output:*\n\`\`\`${truncated_output}\`\`\`"
     fi
-    context+="\n\n*Logs:* \`/srv/life/logs/\`"
+    context+="\n\n*Logs:* \`${LOG_DIR}/\`"
 
     notify_slack "failure" "$message" "$context"
   fi
@@ -148,12 +153,6 @@ acquire_lock() {
 
 check_prerequisites() {
   FAILURE_STEP="prerequisites"
-  if [[ ! -d "$INSTALL_DIR" ]]; then
-    FAILURE_OUTPUT="Install directory not found: $INSTALL_DIR"
-    log_error "prerequisite_failed" "reason" "install_dir_not_found" "path" "$INSTALL_DIR" | tee -a "$LOG_FILE"
-    exit 1
-  fi
-
   if ! command -v docker &>/dev/null; then
     FAILURE_OUTPUT="Docker command not found"
     log_error "prerequisite_failed" "reason" "docker_not_found" | tee -a "$LOG_FILE"
@@ -184,40 +183,15 @@ decrypt_secrets() {
     exit 1
   fi
 
-  if ! sops decrypt secrets/secrets.prod.enc.env >.env 2>&1; then
+  # Readable by its owner alone, because it holds every production secret.
+  # Redirecting into a file keeps the mode it already has, so it is set too.
+  if ! (umask 077 && sops decrypt secrets/secrets.prod.enc.env >.env && chmod 600 .env) 2>&1; then
     FAILURE_OUTPUT="Failed to decrypt - check age key at ~/.config/sops/age/keys.txt"
     log_error "secrets_decrypt_failed" | tee -a "$LOG_FILE"
     exit 1
   fi
 
   log_info "secrets_decrypt_completed" | tee -a "$LOG_FILE"
-}
-
-pull_latest_code() {
-  FAILURE_STEP="git_pull"
-  log_info "git_fetch_started" | tee -a "$LOG_FILE"
-  cd "$INSTALL_DIR"
-
-  if ! git fetch origin main 2>&1; then
-    FAILURE_OUTPUT="Failed to fetch from origin"
-    exit 1
-  fi
-
-  CURRENT_SHA=$(git rev-parse HEAD)
-  NEW_SHA=$(git rev-parse origin/main)
-
-  if [[ "$CURRENT_SHA" == "$NEW_SHA" ]]; then
-    log_info "git_already_up_to_date" "sha" "${CURRENT_SHA:0:7}" | tee -a "$LOG_FILE"
-  else
-    log_info "git_pull_started" \
-      "current_sha" "${CURRENT_SHA:0:7}" \
-      "target_sha" "${NEW_SHA:0:7}" | tee -a "$LOG_FILE"
-    if ! git pull origin main 2>&1; then
-      FAILURE_OUTPUT="Failed to pull from origin/main"
-      exit 1
-    fi
-    log_info "git_pull_completed" "sha" "${NEW_SHA:0:7}" | tee -a "$LOG_FILE"
-  fi
 }
 
 determine_colors() {
@@ -520,10 +494,13 @@ stop_old_containers() {
 }
 
 cleanup_docker() {
-  # Reaps dangling images created when :latest re-tagged to a new SHA.
+  # Removes every image no container uses, the old color's included. An image
+  # pulled by digest alone is not dangling on Docker's containerd image store,
+  # so a plain prune would keep every release the host ever ran. The host runs
+  # only this app, and the live color and the infrastructure hold theirs.
   # Build cache prune dropped — images are built on GHA, no cache on host.
   log_info "docker_cleanup_started" | tee -a "$LOG_FILE"
-  docker image prune -f 2>&1 | tail -1 | tee -a "$LOG_FILE" || true
+  docker image prune --all --force 2>&1 | tail -1 | tee -a "$LOG_FILE" || true
   sudo fstrim -v / 2>&1 | tee -a "$LOG_FILE" || true
   log_info "docker_cleanup_completed" | tee -a "$LOG_FILE"
 }
@@ -531,11 +508,10 @@ cleanup_docker() {
 main() {
   DEPLOY_STARTED=true
   DEPLOY_START_TIME=$(date +%s)
-  log_info "deployment_started" "install_dir" "$INSTALL_DIR" | tee -a "$LOG_FILE"
+  log_info "deployment_started" "install_dir" "$INSTALL_DIR" "version" "$VERSION" "revision" "$REVISION" | tee -a "$LOG_FILE"
 
   acquire_lock
   check_prerequisites
-  pull_latest_code
   decrypt_secrets
 
   # Source Slack webhook URL and the database's name from decrypted .env
@@ -569,14 +545,13 @@ main() {
   duration_str="$((duration_secs / 60))m $((duration_secs % 60))s"
 
   log_info "deployment_completed" \
-    "sha" "${NEW_SHA:0:7}" \
+    "version" "$VERSION" \
+    "revision" "$REVISION" \
     "color" "$DEPLOY_COLOR" \
     "duration_seconds" "$duration_secs" | tee -a "$LOG_FILE"
 
-  local commit_msg
-  commit_msg=$(cd "$INSTALL_DIR" && git log -1 --pretty=format:'%s' 2>/dev/null || echo "unknown")
-
-  local message="*Commit:* \`${NEW_SHA:0:7}\` - $commit_msg"
+  local message="*Version:* \`${VERSION}\`"
+  message+="\n*Commit:* \`${REVISION}\`"
   message+="\n*Duration:* ${duration_str}"
   message+="\n*Active Color:* ${DEPLOY_COLOR}"
   message+="\n*URL:* https://ichrisbirch.com"
