@@ -49,7 +49,12 @@ func serviceIDP(t *testing.T) *httptest.Server {
 		}
 		_, _ = w.Write([]byte(`{"access_token":"` + serviceToken + `","token_type":"bearer","expires_in":300}`))
 	})
-	srv = httptest.NewServer(mux)
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("traceparent") != "" || r.Header.Get("baggage") != "" {
+			t.Errorf("the provider's %s received the run's trace, which only life's API is sent", r.URL.Path)
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -95,6 +100,36 @@ func TestService_AReadCarriesTheClientCredentialsToken(t *testing.T) {
 	entries, _ := os.ReadDir(state)
 	if len(entries) != 0 {
 		t.Errorf("a service run wrote %v under its state directory, want nothing stored", entries)
+	}
+}
+
+// A run started under a trace sends it to life's API, so the API's span sits
+// under whatever ran the command. runLine goes through goclikit.Execute, which
+// is what reads the environment.
+func TestService_ARunSendsTheTraceItWasStartedUnderToTheAPI(t *testing.T) {
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+	const inherited = "session.id=s-1,flow.id=f-2;origin=agent"
+	t.Setenv("TRACEPARENT", "00-"+traceID+"-00f067aa0ba902b7-01")
+	t.Setenv("BAGGAGE", inherited)
+	var received http.Header
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(api.Close)
+	asService(t, serviceIDP(t).URL, api.URL, serviceSecret)
+
+	if err := runLine(t, "tasks", "list"); err != nil {
+		t.Fatalf("list under a trace: %v", err)
+	}
+	if got := received.Get("traceparent"); !strings.HasPrefix(got, "00-"+traceID+"-") {
+		t.Errorf("the API saw traceparent %q, want trace id %s", got, traceID)
+	}
+	// Baggage serializes its members in no fixed order.
+	members := func(header string) []string { return slices.Sorted(slices.Values(strings.Split(header, ","))) }
+	if got := received.Get("baggage"); !slices.Equal(members(got), members(inherited)) {
+		t.Errorf("the API saw baggage %q, want %q whole", got, inherited)
 	}
 }
 

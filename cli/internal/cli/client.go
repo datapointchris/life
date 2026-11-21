@@ -22,6 +22,11 @@ var errNeedsLogin = errors.New("not logged in")
 // newAPIClient builds an authenticated API client. The oauth2 client injects
 // (and refreshes) the bearer token on every request via goclilogin's token
 // source, so resource commands never touch tokens directly.
+//
+// Each request also carries the trace and baggage the CLI was started under, so
+// the API's span sits under whatever ran the command. Only this client is
+// wrapped: the token source fetches through a client of its own, so the token
+// endpoint never receives them.
 func newAPIClient(ctx context.Context) (*api.Client, error) {
 	deployment, err := config.Load(ctx, apiOverride)
 	if err != nil {
@@ -34,7 +39,9 @@ func newAPIClient(ctx context.Context) (*api.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("prepare API client: %w", err)
 	}
-	return api.New(deployment.API.Value, oauth2.NewClient(ctx, source)), nil
+	httpClient := oauth2.NewClient(ctx, source)
+	httpClient.Transport = goclikit.TraceForwardingTransport(httpClient.Transport)
+	return api.New(deployment.API.Value, httpClient), nil
 }
 
 // tokenSource is the config file's token_command where it names one, the

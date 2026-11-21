@@ -288,6 +288,7 @@ path alone, whether or not the file exists.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LIFE_CLIENT_SECRET` | unset | a service client's secret; setting it selects the client-credentials grant for the file's `client_id` |
+| `TRACEPARENT`, `TRACESTATE`, `BAGGAGE` | unset | the W3C trace context and baggage the CLI was started under, sent on each API request as `traceparent`, `tracestate` and `baggage`, so the API's span sits under whatever ran the command; the token endpoint never receives them |
 
 ## Structure
 
