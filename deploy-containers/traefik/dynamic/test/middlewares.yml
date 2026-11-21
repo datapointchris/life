@@ -34,6 +34,9 @@ http:
           - "X-Application-ID"
           - "X-Internal-Service"
           - "X-Service-Key"
+          # W3C Trace Context, which the SPA sends on every API request
+          - "traceparent"
+          - "tracestate"
         accessControlExposeHeaders:
           - "Content-Length"
           - "Content-Type"
@@ -54,7 +57,7 @@ http:
           X-XSS-Protection: "1; mode=block"
           Referrer-Policy: "strict-origin-when-cross-origin"
           X-Environment: "testing"
-          Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.test.localhost:8443 wss: ws:; font-src 'self' data:;"
+          Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.test.localhost:8443 https://otel.test.localhost:8443 wss: ws:; font-src 'self' data:;"
           Permissions-Policy: "geolocation=(), microphone=(), camera=()"
 
     # Rate limiting (permissive for test)

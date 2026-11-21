@@ -32,6 +32,9 @@ http:
           - "X-Application-ID"
           - "X-Internal-Service"
           - "X-Service-Key"
+          # W3C Trace Context, which the SPA sends on every API request
+          - "traceparent"
+          - "tracestate"
         accessControlExposeHeaders:
           - "Content-Length"
           - "Content-Type"

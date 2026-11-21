@@ -4,19 +4,20 @@
  * Mirrors structlog patterns from the Python backend:
  * - Event-based logging with structured context
  * - Module-scoped loggers via createLogger('ModuleName')
- * - Consistent key=value / JSON format
+ * - Consistent key=value format
  *
- * Dev: human-readable structured lines in the browser console.
- * Production: JSON in the browser DevTools — no shipping pipeline. Vue is a
- * static SPA in production, so its logs cannot be scraped by Grafana Alloy.
+ * Every line prints to the browser console, and goes out as an OpenTelemetry
+ * log record wherever `utils/telemetry.ts` exports.
  *
  * Usage:
  *   const logger = createLogger('CountdownsStore')
  *   logger.info('fetch_completed', { count: 5, duration_ms: 123 })
  */
 
+import { SeverityNumber, type LogRecord } from '@opentelemetry/api'
 import { createConsola, LogLevels } from 'consola'
 import type { ConsolaReporter, LogObject } from 'consola'
+import { logContext, telemetryLogger } from './telemetry'
 
 const isDev = import.meta.env.DEV
 
@@ -72,34 +73,40 @@ export function formatLogLine(logObj: LogObject): { line: string; level: string 
   return { line, level }
 }
 
-/**
- * Build a JSON log entry from a LogObject for Loki ingestion.
- * Exported for testing.
- */
-export function formatLogJson(logObj: LogObject): Record<string, unknown> {
+const SEVERITY: Record<string, SeverityNumber> = {
+  error: SeverityNumber.ERROR,
+  warning: SeverityNumber.WARN,
+  info: SeverityNumber.INFO,
+  debug: SeverityNumber.DEBUG,
+}
+
+/** The OpenTelemetry log record for a LogObject: the event as its body, the module and context as attributes. */
+export function logRecordOf(logObj: LogObject): LogRecord {
   const level = levelName(logObj.level)
   const args = logObj.args || []
   const event = typeof args[0] === 'string' ? args[0] : logObj.message || 'log'
-
-  const entry: Record<string, unknown> = {
-    timestamp: new Date().toISOString(),
-    level,
-    event,
-    module: logObj.tag || 'app',
-  }
+  const attributes: Record<string, unknown> = { module: logObj.tag || 'app' }
 
   for (let i = typeof args[0] === 'string' ? 1 : 0; i < args.length; i++) {
     const arg = args[i]
     if (arg && typeof arg === 'object' && !Array.isArray(arg)) {
-      Object.assign(entry, arg)
+      for (const [key, value] of Object.entries(arg as Record<string, unknown>)) {
+        if (value !== undefined && value !== null) attributes[key] = value
+      }
     }
   }
 
-  return entry
+  return {
+    timestamp: logObj.date,
+    severityNumber: SEVERITY[level],
+    severityText: level,
+    body: event as string,
+    attributes: attributes as LogRecord['attributes'],
+  }
 }
 
 /**
- * Structured key=value reporter for dev console output.
+ * Structured key=value reporter for console output.
  * Format mirrors structlog's ConsoleRenderer:
  *   2026-03-13T03:10:00.000Z [info   ] fetch_completed  module=Store count=5
  */
@@ -111,16 +118,9 @@ const structuredReporter: ConsolaReporter = {
   },
 }
 
-/**
- * JSON reporter for production. Emits one JSON object per console.info call,
- * shaped identically to the Python backend's structlog output. Lives only in
- * the user's browser DevTools — there is no shipping pipeline.
- */
-const jsonReporter: ConsolaReporter = {
+const telemetryReporter: ConsolaReporter = {
   log(logObj: LogObject) {
-    const entry = formatLogJson(logObj)
-
-    console.info(JSON.stringify(entry))
+    telemetryLogger.emit({ ...logRecordOf(logObj), context: logContext() })
   },
 }
 
@@ -128,7 +128,7 @@ const jsonReporter: ConsolaReporter = {
 
 const rootConsola = createConsola({
   level: isDev ? LogLevels.debug : LogLevels.info,
-  reporters: [isDev ? structuredReporter : jsonReporter],
+  reporters: [structuredReporter, telemetryReporter],
 })
 
 // --- Public API ---
@@ -147,11 +147,8 @@ export interface Logger {
  *   const logger = createLogger('CountdownsStore')
  *   logger.info('fetch_completed', { count: 5, duration_ms: 123 })
  *
- * Dev output:
+ * Console output:
  *   2026-03-13T03:10:00.000Z [info   ] fetch_completed                module=CountdownsStore count=5 duration_ms=123
- *
- * Production output (JSON for Loki):
- *   {"timestamp":"2026-03-13T03:10:00.000Z","level":"info","event":"fetch_completed","module":"CountdownsStore","count":5,"duration_ms":123}
  */
 export function createLogger(module: string): Logger {
   const scoped = rootConsola.withTag(module)

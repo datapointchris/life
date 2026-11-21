@@ -12,7 +12,7 @@ The life frontend is a Vue 3 SPA with TypeScript, served behind `app.docker.loca
 | Routing | Vue Router | Client-side routing with lazy-loaded views |
 | Build | Vite 7.x | Fast HMR in dev, optimized production builds |
 | Styling | SCSS (ITCSS) | Global SCSS system in `frontend/src/assets/sass/` |
-| HTTP | Axios | API calls with request tracing |
+| HTTP | Axios | API calls, each a client span in its navigation's trace |
 | Logging | consola | Structured logging matching structlog format |
 | Unit Tests | Vitest + Vue Test Utils | Store and component testing |
 | E2E Tests | Playwright | Full-stack testing through Traefik |
@@ -23,7 +23,8 @@ The life frontend is a Vue 3 SPA with TypeScript, served behind `app.docker.loca
 | --- | --- |
 | `frontend/src/utils/logger.ts` | consola-based structured logger (createLogger pattern) |
 | `frontend/src/api/errors.ts` | ApiError class with status, detail, validationErrors, requestId |
-| `frontend/src/api/client.ts` | Axios with X-Request-ID tracing, structured logging, WeakMap metadata |
+| `frontend/src/api/client.ts` | Axios with a client span and `traceparent` per request, structured logging, WeakMap metadata |
+| `frontend/src/utils/telemetry.ts` | OpenTelemetry: a trace per navigation, exported where the build set `VITE_OTEL_ENDPOINT` |
 | `frontend/src/stores/countdowns.ts` | Reference implementation for Pinia store with error handling |
 | `frontend/e2e/countdowns.spec.ts` | Reference E2E tests through real Traefik routing |
 

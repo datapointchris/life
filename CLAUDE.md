@@ -308,5 +308,5 @@ Docker's logging driver keeps that output, and Grafana Alloy ships it to Loki.
 A request's `request_id` is its trace ID, echoed as `X-Request-ID`, and every line written inside a span carries `trace_id` and `span_id`.
 The API and the scheduler start under `opentelemetry-instrument` in production and dev, which loads `life/opentelemetry_distro.py` through this package's entry points. A process with no `OTEL_EXPORTER_OTLP_ENDPOINT` instruments nothing and exports nothing. `docs/logging-configuration.md` § "Traces" has the variables.
 Dev sends to its own `otel-collector` service, which prints each span in its log, or forwards where `LIFE_OTEL_FORWARD_ENDPOINT` names. `docs/logging-configuration.md` § "The dev stack's Collector" has the rest.
-Vue logs through consola via `createLogger('ModuleName')`, in structlog's key=value shape, and as JSON for Loki in production.
+Vue logs through consola via `createLogger('ModuleName')`, in structlog's key=value shape. `frontend/src/utils/telemetry.ts` traces each navigation and API request as `life-vue`, sends a `traceparent` on every request, and posts spans and log records only where the build set `VITE_OTEL_ENDPOINT`. `docs/logging-configuration.md` § "The browser's traces" has the trace's shape.
 `./ops/lifeops {dev,testing} logs [service]` reads a running environment's logs.

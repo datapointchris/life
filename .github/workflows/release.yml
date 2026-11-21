@@ -70,6 +70,7 @@ jobs:
             target: ""
             build_args: |
               VITE_API_URL=/api/v1
+              VITE_OTEL_ENDPOINT=https://otel.ichrisbirch.com
     steps:
       - uses: actions/checkout@v7
       # SHA-pinned because they are third-party and the major tag moves. The
@@ -99,7 +100,10 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
-          build-args: ${{ matrix.build_args }}
+          # The strategy block cannot read secrets, so the SPA's ingest token joins here.
+          build-args: |
+            ${{ matrix.build_args }}
+            ${{ matrix.image == 'life-vue' && format('VITE_OTEL_INGEST_TOKEN={0}', secrets.OTEL_INGEST_TOKEN) || '' }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

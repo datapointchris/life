@@ -40,7 +40,8 @@ http:
         accessControlMaxAge: 86400
         addVaryHeader: true
 
-    # Security headers — full production hardening (HSTS, CSP, Permissions-Policy)
+    # Security headers — full production hardening (HSTS, CSP, Permissions-Policy).
+    # connect-src names the one other origin the SPA posts to: the gateway taking its OTLP.
     security-headers-prod:
       headers:
         customRequestHeaders:
@@ -52,7 +53,7 @@ http:
           Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
           Referrer-Policy: "strict-origin-when-cross-origin"
           X-Environment: "production"
-          Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self' wss: ws: https://*.ichrisbirch.com; font-src 'self' data: https://fonts.gstatic.com;"
+          Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self' https://otel.ichrisbirch.com; font-src 'self' data: https://fonts.gstatic.com;"
           Permissions-Policy: "geolocation=(), microphone=(), camera=()"
 
     # Rate limiting (strict for production)

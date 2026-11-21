@@ -213,6 +213,8 @@ services:
     command: sh -c "npm install && npm run dev"
     environment: !override
       - VITE_API_URL=https://api.test.localhost:8443/api/v1
+      # Nothing serves this name. e2e/telemetry.spec.ts answers the SPA's posts with page.route.
+      - VITE_OTEL_ENDPOINT=https://otel.test.localhost:8443
       - LIFE_TEST_STACK=true
       - NPM_CONFIG_UPDATE_NOTIFIER=false
     restart: on-failure:3

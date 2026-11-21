@@ -1,5 +1,6 @@
 import { START_LOCATION, createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { isPhoneViewport } from '@/composables/usePhoneViewport'
+import { traceNavigations } from '@/utils/telemetry'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -297,6 +298,9 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
 })
+
+// First, so a request a guard below makes falls inside its navigation's span.
+traceNavigations(router)
 
 function isInstalledApp(): boolean {
   if (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) return true
