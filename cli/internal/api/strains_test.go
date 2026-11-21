@@ -180,6 +180,9 @@ func TestStrainFilter_ActiveNamesWhatNarrowedTheResult(t *testing.T) {
 			t.Errorf("Active()[%d] = %q, want %q", i, active[i], value)
 		}
 	}
+	if got := (StrainFilter{Query: "purple punch"}).Active(); len(got) != 1 || got[0] != `"purple punch"` {
+		t.Errorf("a search names its term as typed, got %v", got)
+	}
 	if got := (StrainFilter{}).Active(); len(got) != 0 {
 		t.Errorf("an unfiltered read names nothing, got %v", got)
 	}

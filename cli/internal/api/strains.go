@@ -120,16 +120,20 @@ func (f StrainFilter) query() url.Values {
 }
 
 // Active names the filters carrying a value, for an empty result that would
-// otherwise read as an empty catalog.
+// otherwise read as an empty catalog. A filter is named as the flag that sets
+// it. The search term is named quoted, as typed, because it is the positional
+// argument of `strains search` and no flag carries it.
 func (f StrainFilter) Active() []string {
 	var active []string
+	if f.Query != "" {
+		active = append(active, strconv.Quote(f.Query))
+	}
 	for _, pair := range [][2]string{
 		{"--type", f.StrainType},
 		{"--status", f.Status},
 		{"--effect", f.Effect},
 		{"--flavor", f.Flavor},
 		{"--terpene", f.Terpene},
-		{"--query", f.Query},
 	} {
 		if pair[1] != "" {
 			active = append(active, fmt.Sprintf("%s %s", pair[0], pair[1]))
