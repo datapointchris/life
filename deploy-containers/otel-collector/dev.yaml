@@ -1,0 +1,52 @@
+# The dev stack's OpenTelemetry Collector, the `otel-collector` service in
+# docker-compose.dev.yml. The api and the scheduler send it OTLP by service name,
+# and the browser through Traefik at otel.docker.localhost.
+#
+# Every record leaves through otlp_http/forward, to LIFE_OTEL_FORWARD_ENDPOINT.
+# Where that is unset, the compose file names otlp/printed, this Collector's own
+# second receiver, whose pipelines print each record to the service's log.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        # The dev app's origins, from the vue routers in traefik/dynamic/dev/routing.yml.
+        # Traefik leaves CORS to the Collector on the otel-collector router.
+        cors:
+          allowed_origins:
+            - https://app.docker.localhost
+            - https://vue.docker.localhost
+  otlp/printed:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4319
+
+processors:
+  # Dev records sit beside production's in one store, and this attribute tells them apart.
+  resource/development:
+    attributes:
+      - key: deployment.environment.name
+        value: development
+        action: upsert
+  batch: {}
+
+exporters:
+  otlp_http/forward:
+    endpoint: ${env:LIFE_OTEL_FORWARD_ENDPOINT}
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces: &received
+      receivers: [otlp]
+      processors: [resource/development, batch]
+      exporters: [otlp_http/forward]
+    metrics: *received
+    logs: *received
+    traces/printed: &printed
+      receivers: [otlp/printed]
+      exporters: [debug]
+    metrics/printed: *printed
+    logs/printed: *printed

@@ -44,7 +44,10 @@ own overrides.
 ## Environments
 
 Development is `https://app.docker.localhost/` with the API at
-`https://api.docker.localhost/`. pytest runs against its own Postgres and Redis.
+`https://api.docker.localhost/`. Dev adds an `otel-collector` service, which
+takes every trace the stack makes at `https://otel.docker.localhost/`.
+[Logging](../logging-configuration.md#the-dev-stacks-collector) says where it
+sends them. pytest runs against its own Postgres and Redis.
 The e2e suite runs inside the checkout's test stack, which publishes no ports,
 so `https://app.test.localhost:8443/` resolves only there.
 

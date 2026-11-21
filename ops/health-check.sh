@@ -144,6 +144,7 @@ check_containers() {
         "life-dev-postgres"
         "life-dev-redis"
         "life-dev-scheduler"
+        "life-dev-otel-collector"
       )
       ;;
     test)

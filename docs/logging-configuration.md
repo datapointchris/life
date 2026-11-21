@@ -108,6 +108,20 @@ Every other `OTEL_*` variable the SDK reads still applies, and overrides the dis
 
 Each span's resource also names the process that made it: `process.pid`, its command line, `host.name` (the container) and a `service.instance.id` drawn fresh per process. uvicorn's workers share one service name, so these are what tell one worker's spans from another's.
 
+#### The dev stack's Collector
+
+The dev stack runs an OpenTelemetry Collector of its own, the `otel-collector` service, configured by `deploy-containers/otel-collector/dev.yaml`. The dev api and scheduler send to it at `http://otel-collector:4318`, as `life-api` and `life-scheduler`. The browser reaches it through Traefik at `https://otel.docker.localhost`, which the dev `vue` service passes as `VITE_OTEL_ENDPOINT`. Its receiver answers CORS for the dev app's origins, so the browser needs no token.
+
+The Collector stamps every record `deployment.environment.name=development`, so dev records sit beside production's in one store and one filter separates them.
+
+`LIFE_OTEL_FORWARD_ENDPOINT` decides where the records go. Set it in the shell or in `.env` to an OTLP/HTTP base URL, and the Collector forwards there. Left unset, the debug exporter prints each span in the Collector's own log:
+
+```bash
+./ops/lifeops dev logs otel-collector
+```
+
+A change to the variable takes effect on the next `lifeops dev restart`.
+
 ### Scheduler Job Correlation
 
 Scheduler jobs are not request-scoped, so they get their own correlation token.

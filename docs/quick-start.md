@@ -36,6 +36,7 @@ Add these entries to your `/etc/hosts` file:
 echo "127.0.0.1 api.docker.localhost" | sudo tee -a /etc/hosts
 echo "127.0.0.1 app.docker.localhost" | sudo tee -a /etc/hosts
 echo "127.0.0.1 dashboard.docker.localhost" | sudo tee -a /etc/hosts
+echo "127.0.0.1 otel.docker.localhost" | sudo tee -a /etc/hosts
 ```
 
 ## ⚡ Quick Start Commands
@@ -117,6 +118,7 @@ The CLI has been **completely simplified** to eliminate confusing command duplic
 - **FastAPI Backend**: `https://api.docker.localhost/`
 - **App Frontend**: `https://app.docker.localhost/` (Vue 3 SPA)
 - **Traefik Dashboard**: `https://dashboard.docker.localhost/` (dev/devpass)
+- **OpenTelemetry Collector**: `https://otel.docker.localhost/` (OTLP/HTTP; spans print in `lifeops dev logs otel-collector`)
 
 > **Note**: All 14 pages are served by Vue 3 at `app.docker.localhost`. Routing is controlled by `deploy-containers/traefik/vue-paths.txt`.
 

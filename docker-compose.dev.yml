@@ -108,10 +108,39 @@ services:
         max-file: "3"
         tag: "redis-dev"
 
+  # Every OTLP record the stack makes passes through here, stamped
+  # deployment.environment.name=development. It goes on to
+  # LIFE_OTEL_FORWARD_ENDPOINT, read from the shell or .env. Unset, the debug
+  # exporter prints each record in this service's log.
+  otel-collector:
+    # The release the production Collector runs.
+    image: otel/opentelemetry-collector-contrib:0.163.2
+    container_name: life-dev-otel-collector
+    command: ["--config=/etc/otelcol-contrib/dev.yaml"]
+    environment:
+      # 4319 is the Collector's own printing receiver, which dev.yaml describes.
+      - LIFE_OTEL_FORWARD_ENDPOINT=${LIFE_OTEL_FORWARD_ENDPOINT:-http://127.0.0.1:4319}
+    volumes:
+      - ./deploy-containers/otel-collector/dev.yaml:/etc/otelcol-contrib/dev.yaml:ro
+    restart: on-failure:3
+    networks:
+      - proxy
+      - default
+    labels:
+      - "traefik.environment=development"
+      - "traefik.enable=true"
+      - "traefik.http.services.otel-collector.loadbalancer.server.port=4318"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "otel-collector-dev"
+
   api:
     <<: *app-build
     container_name: life-dev-api
-    command: uvicorn life.wsgi_api:api --host 0.0.0.0 --port 8000 --reload --reload-dir life/api --reload-dir life/models --reload-dir life/schemas --log-level debug --no-access-log
+    command: opentelemetry-instrument uvicorn life.wsgi_api:api --host 0.0.0.0 --port 8000 --reload --reload-dir life/api --reload-dir life/models --reload-dir life/schemas --log-level debug --no-access-log
     environment: !override
       - ENVIRONMENT=development
       - FASTAPI_DEBUG=True
@@ -119,6 +148,11 @@ services:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
       - LOG_COLORS=${LOG_COLORS:-true}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=life-api
+    depends_on:
+      otel-collector:
+        condition: service_started
     ports: !override
       - "8000:8000"
     restart: on-failure:3
@@ -154,6 +188,8 @@ services:
     command: sh -c "npm install && npm run dev"
     environment: !override
       - VITE_API_URL=https://api.docker.localhost/api/v1
+      # The otel-collector service's OTLP/HTTP base URL, through Traefik.
+      - VITE_OTEL_ENDPOINT=https://otel.docker.localhost
     ports: !override
       - "5173:5173"
     restart: on-failure:3
@@ -180,11 +216,17 @@ services:
   scheduler:
     <<: *app-build
     container_name: life-dev-scheduler
+    command: opentelemetry-instrument python -m life.wsgi_scheduler
     environment: !override
       - ENVIRONMENT=development
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
       - LOG_COLORS=${LOG_COLORS:-true}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=life-scheduler
+    depends_on:
+      otel-collector:
+        condition: service_started
     restart: on-failure:3
     volumes: !override
       - .:/app

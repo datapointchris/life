@@ -23,6 +23,7 @@ source "$LIFE_HOME/ops/lib/urls.sh"
 DEV_API_URL="$(life_service_url dev api)"
 DEV_APP_URL="$(life_service_url dev app)"
 DEV_DASHBOARD_URL="$(life_service_url dev dashboard)"
+DEV_OTLP_URL="$(life_service_url dev otel)"
 DEV_API_PORT="http://localhost:8000"
 
 # Each checkout keeps its own test reports, because several run tests at once
@@ -359,6 +360,7 @@ function dev-start() {
   echo "  ${green}API${reset}:       ${cyan}${DEV_API_URL}${reset}"
   echo "  ${green}APP${reset}:       ${cyan}${DEV_APP_URL}${reset}"
   echo "  ${green}DASHBOARD${reset}: ${cyan}${DEV_DASHBOARD_URL}${reset} (user: dev, pass: devpass)"
+  echo "  ${green}OTLP${reset}:      ${cyan}${DEV_OTLP_URL}${reset}"
   echo ""
   echo "Direct ports (bypass Traefik):"
   echo "  ${green}API${reset}:  ${cyan}${DEV_API_PORT}${reset}"

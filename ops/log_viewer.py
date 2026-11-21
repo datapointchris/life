@@ -44,6 +44,7 @@ SERVICE_STYLE = {
     'vue': 'bright_blue',
     'scheduler': 'yellow',
     'traefik': 'cyan',
+    'otel-collector': 'magenta',
     'redis': 'red',
     'postgres': 'green',
     'db': 'green',
@@ -52,8 +53,10 @@ SERVICE_STYLE = {
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 PREFIX_RE = re.compile(r'^([A-Za-z0-9_.-]+)\s*\|\s?(.*)$')
 # A test stack's project carries its checkout's name, `life-test-<checkout>`, and
-# no service name has a hyphen, so the service is what follows the last one.
-CONTAINER_STRIP_RE = re.compile(r'^life-(?:dev|test(?:-.+?)?|prod|blue|green|infra)-(?=[a-z]+$)')
+# no service it runs has a hyphen, so the service is what follows the last one.
+# Every other prefix is fixed, so a service there may hold one, as dev's
+# otel-collector does.
+CONTAINER_STRIP_RE = re.compile(r'^life-(?:(?:dev|prod|blue|green|infra)-(?=[a-z-]+$)|test(?:-.+?)?-(?=[a-z]+$))')
 
 META_KEYS = {'timestamp', 'level', 'event', 'filename', 'func_name', 'lineno'}
 

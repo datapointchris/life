@@ -11,6 +11,7 @@ def test_parse_prefix_strips_the_environment_prefix():
     assert log_viewer.parse_prefix('life-blue-api | {"event":"x"}') == ('api', '{"event":"x"}')
     assert log_viewer.parse_prefix('life-test-scheduler  | blah') == ('scheduler', 'blah')
     assert log_viewer.parse_prefix('life-infra-traefik | startup') == ('traefik', 'startup')
+    assert log_viewer.parse_prefix('life-dev-otel-collector | span') == ('otel-collector', 'span')
 
 
 def test_parse_prefix_strips_a_test_stack_named_after_a_hyphenated_checkout():

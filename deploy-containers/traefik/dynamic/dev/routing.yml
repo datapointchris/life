@@ -22,6 +22,17 @@ http:
         - dev-security@file
         - dev-authelia-sim@file
 
+    # OpenTelemetry Collector — the browser posts OTLP here. The Collector
+    # answers CORS itself, so dev-cors stays off this router.
+    otel-collector:
+      rule: "Host(`otel.docker.localhost`)"
+      service: otel-collector@docker
+      entrypoints:
+        - websecure
+      tls: {}
+      middlewares:
+        - dev-security@file
+
     # Vue SPA — full app at vue.docker.localhost
     vue:
       rule: "Host(`vue.docker.localhost`)"
