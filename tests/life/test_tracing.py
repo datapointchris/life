@@ -5,6 +5,7 @@ other test's spans reach it. The launcher tests run `opentelemetry-instrument`
 itself, the way production starts.
 """
 
+import json
 import os
 import subprocess  # nosec B404
 import sys
@@ -12,6 +13,8 @@ import threading
 from http.server import BaseHTTPRequestHandler
 from http.server import HTTPServer
 from pathlib import Path
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 import redis
@@ -27,6 +30,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind
 
 from life.api import API_PREFIX
+from life.api import article_import_worker
 from life.api.main import create_api
 from life.config import get_settings
 from life.database.session import get_db_engine
@@ -133,6 +137,31 @@ def test_a_job_run_is_a_span_named_for_the_job_holding_its_run_id(tracer_provide
     (ran,) = [r.msg for r in caplog.records if isinstance(r.msg, dict) and r.msg.get('event') == 'traced_job_ran']
     assert span.attributes['job.run_id'] == ran['job_run_id']
     assert ran['trace_id'] == trace.format_trace_id(span.context.trace_id)
+
+
+def test_a_queued_import_runs_under_the_request_that_queued_it_and_polling_makes_no_span(
+    traced_api, tracer_provider, span_exporter, finished_spans, monkeypatch
+):
+    monkeypatch.setattr(article_import_worker, 'tracer', tracer_provider.get_tracer(article_import_worker.__name__))
+    redis_client = traced_api.app.state.redis_client
+    redis_client.delete(article_import_worker.QUEUE_KEY, article_import_worker.PAUSE_KEY)
+    caller = {'traceparent': f'00-{CALLER_TRACE_ID}-{CALLER_SPAN_ID}-01', 'baggage': f'caller.flow.id={FLOW_ID}'}
+    traced_api.post(f'{API_PREFIX}/articles/bulk-import', json={'urls': ['https://example.com/traced']}, headers=SIGNED_IN | caller)
+    (queued_by,) = [s for s in finished_spans() if s.kind == SpanKind.SERVER]
+    worker = article_import_worker.ArticleImportWorker(redis_client, test_settings)
+
+    span_exporter.clear()
+    _, popped = worker._poll()
+    assert finished_spans() == ()
+    with patch.object(article_import_worker, 'summarize_and_create_article', return_value=MagicMock(title='Traced')):
+        worker._process_item(json.loads(popped[1]))
+
+    (imported,) = [s for s in finished_spans() if s.name == 'article_import']
+    assert imported.parent.span_id == queued_by.context.span_id
+    assert trace.format_trace_id(imported.context.trace_id) == CALLER_TRACE_ID
+    assert imported.attributes['caller.flow.id'] == FLOW_ID
+    for key in redis_client.keys('article_import:*'):
+        redis_client.delete(key)
 
 
 PROBE = """

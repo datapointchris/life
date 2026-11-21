@@ -96,6 +96,8 @@ X-Request-ID: abc12345 (SPA only)
 
 The API and the scheduler start under `opentelemetry-instrument`, which loads the distro in `life/opentelemetry_distro.py`. Where `OTEL_EXPORTER_OTLP_ENDPOINT` names a collector, each process exports its spans there over OTLP/HTTP: the request's route, its SQL and Redis calls, and each page `get_page` fetches. Where none is named, nothing is instrumented and nothing is exported. `/health` is never traced.
 
+A bulk article import stores the enqueuing request's `traceparent` and `baggage` on each queued item. The worker imports each item in an `article_import` span under that request, so the import shows in the caller's trace. Its poll of the empty queue every few seconds makes no span.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | The collector's OTLP/HTTP base URL. Unset turns tracing off. |

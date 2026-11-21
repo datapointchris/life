@@ -1,7 +1,11 @@
 """Background worker for bulk article imports via Redis queue.
 
 Queue item format (JSON string in Redis list):
-    {"batch_id": "...", "url": "...", "notes": "...", "attempt": 1, "actor": "...", "request_id": "..."}
+    {"batch_id": "...", "url": "...", "notes": "...", "attempt": 1, "actor": "...", "request_id": "...",
+     "trace_context": {"traceparent": "...", "baggage": "..."}}
+
+    `trace_context` is the enqueuing request's W3C headers, so each item's import
+    runs as a span under the request that queued it, carrying its caller's baggage.
 
 Batch status (Redis hash at article_import:batch:{batch_id}):
     status, total, processed, succeeded, failed_count, errors (JSON), results (JSON),
@@ -20,9 +24,14 @@ import json
 import math
 import threading
 import uuid
+from typing import Any
 
 import redis
 import structlog
+from opentelemetry import propagate
+from opentelemetry import trace
+from opentelemetry.instrumentation.utils import suppress_instrumentation
+from opentelemetry.trace import SpanKind
 
 from life.ai.assistants.anthropic import AssistantUsageLimitReached
 from life.config import Settings
@@ -36,6 +45,7 @@ from life.services.url_extraction import PageUnreadable
 from life.util import clean_url
 
 logger = structlog.get_logger()
+tracer = trace.get_tracer(__name__)
 
 QUEUE_KEY = 'article_import:queue'
 BATCH_KEY_PREFIX = 'article_import:batch:'
@@ -71,6 +81,8 @@ def enqueue_bulk_import(redis_client: redis.Redis, urls: list[str], notes_map: d
     batch_id = str(uuid.uuid4())
     notes_map = notes_map or {}
     request_id = structlog.contextvars.get_contextvars().get('request_id')
+    trace_context: dict[str, str] = {}
+    propagate.inject(trace_context)
 
     pipeline = redis_client.pipeline()
     for url in urls:
@@ -82,6 +94,7 @@ def enqueue_bulk_import(redis_client: redis.Redis, urls: list[str], notes_map: d
                 'attempt': 1,
                 'actor': actor,
                 'request_id': request_id,
+                'trace_context': trace_context,
             }
         )
         pipeline.rpush(QUEUE_KEY, item)
@@ -154,10 +167,10 @@ class ArticleImportWorker:
     def _run(self):
         while not self._stop_event.is_set():
             try:
-                if (pause_seconds := self.redis_client.ttl(PAUSE_KEY)) > 0:
+                pause_seconds, result = self._poll()
+                if pause_seconds > 0:
                     self._stop_event.wait(timeout=pause_seconds)
                     continue
-                result = self.redis_client.blpop(QUEUE_KEY, timeout=QUEUE_WAIT_SECONDS)
                 if result is None:
                     continue
                 _, item_json = result
@@ -168,7 +181,29 @@ class ArticleImportWorker:
                 if self._stop_event.wait(timeout=2):
                     break
 
+    def _poll(self) -> tuple[int, Any]:
+        """The pause's remaining seconds, or the next item once one arrives within QUEUE_WAIT_SECONDS.
+
+        It makes no span. Every worker polls an empty queue every few seconds, and
+        each poll's Redis commands would otherwise be a trace of their own.
+        """
+        with suppress_instrumentation():
+            if (pause_seconds := self.redis_client.ttl(PAUSE_KEY)) > 0:
+                return pause_seconds, None
+            return 0, self.redis_client.blpop(QUEUE_KEY, timeout=QUEUE_WAIT_SECONDS)
+
     def _process_item(self, item: dict):
+        """Import one item inside a span under the request that queued it."""
+        attributes = {
+            'article_import.batch_id': item['batch_id'],
+            'article_import.attempt': item.get('attempt', 1),
+            'url.full': item['url'],
+        }
+        parent = propagate.extract(item.get('trace_context') or {})
+        with tracer.start_as_current_span('article_import', context=parent, kind=SpanKind.CONSUMER, attributes=attributes):
+            self._import_item(item)
+
+    def _import_item(self, item: dict):
         batch_id = item['batch_id']
         url = item['url']
         attempt = item.get('attempt', 1)
