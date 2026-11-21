@@ -148,6 +148,10 @@ func newCookingTechniquesCategoriesCommand() *cobra.Command {
 			if asJSON {
 				return encodeJSON(cmd.OutOrStdout(), categories)
 			}
+			if len(categories) == 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No technique categories.")
+				return nil
+			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			_, _ = fmt.Fprintln(tw, "COUNT\tCATEGORY")
 			for _, cat := range categories {

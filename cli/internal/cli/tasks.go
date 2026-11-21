@@ -518,6 +518,10 @@ func newTaskCategoriesListCommand() *cobra.Command {
 			if asJSON {
 				return encodeJSON(cmd.OutOrStdout(), categories)
 			}
+			if len(categories) == 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No task categories.")
+				return nil
+			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			_, _ = fmt.Fprintln(tw, "CATEGORY\tWINDOW (DAYS)")
 			for _, c := range categories {
