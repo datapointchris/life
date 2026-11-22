@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publishes the deploy directory: the files scripts/deploy-homelab.sh runs from, its app compose file naming each image this release pushed, by digest.
+# Publishes the deploy directory: the files scripts/deploy-homelab.sh and lifeops' prod verbs run from, its app compose file naming each image this release pushed, by digest.
 set -euo pipefail
 
 usage() {
@@ -7,8 +7,9 @@ usage() {
 Usage: push-deploy-directory --registry <host>/<namespace> --version <version>
          --revision <sha> --source <url> [--plain-http]
 
-Copies every file scripts/deploy-homelab.sh reads, as the commit <revision>
-holds it, into a directory named deploy, at its path in the repo. In
+Copies every file scripts/deploy-homelab.sh and lifeops' prod verbs read, as
+the commit <revision> holds it, into a directory named deploy, at its path in
+the repo. In
 docker-compose.app.yml there, the image line naming <image>:latest names
 <registry>/<image>@<digest> instead, for life and life-vue, where <digest> is
 what <registry>/<image>:<version> resolves to. Pushes that directory with ORAS
@@ -82,14 +83,21 @@ command -v oras >/dev/null || die "oras is not on PATH"
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 git -C "$repo" rev-parse --quiet --verify "$revision^{commit}" >/dev/null || die "$revision is not a commit in $repo"
 
-# What the deploy script reads, runs or sources, and what those read in turn. A
-# directory stands for every file git tracks under it, because Traefik reads the
-# whole of deploy-containers/traefik/dynamic/prod through the infra compose file's mount.
+# What the deploy script reads, runs or sources, and what those read in turn.
+# ops/lifeops and what it sources are here too, because its prod verbs, such as
+# deploy-status, rollback and logs, run on the production host from this
+# directory. A directory stands for every file git tracks under it, because
+# Traefik reads the whole of deploy-containers/traefik/dynamic/prod through the
+# infra compose file's mount.
 deploy_paths=(
   docker-compose.app.yml
   docker-compose.infra.yml
   deploy-containers/traefik/dynamic/prod
   life/database/roles.sql
+  ops/db
+  ops/lib/urls.sh
+  ops/lifeops
+  ops/stats
   scripts/bash-lib/logging.sh
   scripts/converge-database-roles.psql
   scripts/converge-database-roles.sh
