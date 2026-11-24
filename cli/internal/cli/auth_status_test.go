@@ -14,7 +14,7 @@ import (
 func statusOutput(r statusReport) string {
 	var out bytes.Buffer
 	r.Configured = true
-	printStatus(&out, r, goclilogin.Deployment{}, nil)
+	printStatus(&out, r, goclilogin.Deployment{})
 	return out.String()
 }
 

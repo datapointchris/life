@@ -307,7 +307,11 @@ func newAuthStatusCommand() *cobra.Command {
 					return err
 				}
 			} else {
-				printStatus(cmd.OutOrStdout(), report, deployment, loadErr)
+				printStatus(cmd.OutOrStdout(), report, deployment)
+			}
+			if loadErr != nil {
+				// stderr, so stdout carries only the status report.
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "\n"+loadErr.Error())
 			}
 
 			// A rejected session exits non-zero for the same reason being logged
@@ -381,13 +385,14 @@ func grantedStatus(source oauth2.TokenSource, err error, report *statusReport) {
 
 // printStatus leads with the verdict on a line of its own, then prints where
 // the CLI is pointed. A script checking a login reads the first line alone.
+// An unconfigured deployment has no verdict line: its caller writes the
+// missing setting to stderr and exits 1.
 //
 // WriteDeployment's widest key is client_id, padded by two, so the rows after
 // it pad their key to the column its values start in.
-func printStatus(out io.Writer, r statusReport, d goclilogin.Deployment, loadErr error) {
+func printStatus(out io.Writer, r statusReport, d goclilogin.Deployment) {
 	switch {
 	case !r.Configured:
-		_, _ = fmt.Fprintf(out, "%v\n", loadErr)
 	case r.Type == externalAccount && r.LoggedIn:
 		_, _ = fmt.Fprintln(out, "Handed a token by token_command")
 	case r.Type == externalAccount:
