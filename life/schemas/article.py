@@ -1,4 +1,5 @@
 import datetime as dt
+from typing import ClassVar
 
 from pydantic import AwareDatetime
 from pydantic import BaseModel
@@ -59,6 +60,8 @@ class Article(ArticleConfig):
 
 class ArticleUpdate(ArticleConfig, PartialUpdate):
     updates = models.Article
+    # The column takes a null so this release reads one, and no client writes one until the release after it.
+    refuses_null: ClassVar[frozenset[str]] = frozenset({'summary'})
 
     title: OneLineText | None = None
     tags: list[str] = []
