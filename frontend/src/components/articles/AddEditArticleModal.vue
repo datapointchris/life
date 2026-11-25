@@ -70,7 +70,6 @@
             data-testid="article-summary-input"
             rows="6"
             class="textbox"
-            required
           ></textarea>
         </div>
 
@@ -126,7 +125,7 @@ const props = defineProps<{
     title: string
     url: string
     tags: string[]
-    summary: string
+    summary: string | null
     notes?: string
   } | null
 }>()
@@ -155,7 +154,7 @@ watch(
       form.url = props.editData.url
       form.title = props.editData.title
       form.tags = props.editData.tags.join(', ')
-      form.summary = props.editData.summary
+      form.summary = props.editData.summary ?? ''
       form.notes = props.editData.notes ?? ''
     }
   }
@@ -199,13 +198,13 @@ async function handleAutoPopulate() {
 }
 
 function handleSubmit(handleSuccess: () => void) {
-  if (!form.title.trim() || !form.summary.trim()) return
+  if (!form.title.trim()) return
   if (!props.editData && !form.url.trim()) return
   if (props.editData) {
     emit('update', props.editData.id, {
       title: form.title.trim(),
       tags: parseTags(form.tags),
-      summary: form.summary.trim(),
+      summary: form.summary.trim() || null,
       notes: form.notes.trim() || undefined,
     })
   } else {
@@ -213,7 +212,7 @@ function handleSubmit(handleSuccess: () => void) {
       url: form.url.trim(),
       title: form.title.trim(),
       tags: parseTags(form.tags),
-      summary: form.summary.trim(),
+      summary: form.summary.trim() || undefined,
       notes: form.notes.trim() || undefined,
       save_date: new Date().toISOString(),
     })

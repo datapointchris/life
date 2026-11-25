@@ -375,7 +375,7 @@ export interface Article {
   title: string
   url: string
   tags: string[]
-  summary: string
+  summary: string | null
   notes?: string
   save_date: string
   last_read_date?: string
@@ -390,7 +390,7 @@ export interface ArticleCreate {
   title: string
   url: string
   tags?: string[]
-  summary: string
+  summary?: string
   notes?: string
   save_date: string
   read_count?: number
@@ -403,7 +403,7 @@ export interface ArticleCreate {
 export interface ArticleUpdate {
   title?: string
   tags?: string[]
-  summary?: string
+  summary?: string | null
   notes?: string
   is_favorite?: boolean
   is_current?: boolean

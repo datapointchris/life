@@ -406,12 +406,14 @@ def test_read_many_returns_empty_list_when_no_articles(txn_api_logged_in):
 # ---------------------------------------------------------------------------
 
 
-def test_create_article_without_summary_returns_422(txn_api_logged_in):
-    """POST /articles without summary returns 422 (summary is required)."""
+def test_an_article_saved_without_a_summary_reads_back_with_none(txn_api_logged_in):
     client, _ = txn_api_logged_in
     payload = {'title': 'No Summary', 'url': 'http://nosummary.com', 'save_date': str(dt.datetime.now(dt.UTC))}
-    response = client.post(ENDPOINT, json=payload)
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, show_status_and_response(response)
+    created = client.post(ENDPOINT, json=payload)
+    assert created.status_code == status.HTTP_201_CREATED, show_status_and_response(created)
+    response = client.get(f'{ENDPOINT}/{created.json()["id"]}')
+    assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
+    assert response.json()['summary'] is None
 
 
 def test_create_article_without_save_date_returns_422(txn_api_logged_in):
