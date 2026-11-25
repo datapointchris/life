@@ -18,6 +18,7 @@ from stats.cli.data import QUALITY_TOOLS
 from stats.cli.data import aggregate_hook_issues
 from stats.cli.data import hook_run_summary
 from stats.cli.data import sum_issues_in_window
+from stats.config import load_config
 
 
 def issue_cell(count: int) -> str:
@@ -134,5 +135,5 @@ def render(events_path: str, *, console: Console | None = None) -> None:
 
 
 if __name__ == '__main__':
-    events_file = sys.argv[1] if len(sys.argv) > 1 else 'stats/data/events/events.jsonl'
+    events_file = sys.argv[1] if len(sys.argv) > 1 else load_config()['events_path']
     render(events_file)

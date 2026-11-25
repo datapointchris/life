@@ -7,8 +7,9 @@
 # SC2034: Variables may appear unused but are used by sourcing script
 # SC2154: Color variables are defined in main CLI before sourcing
 
-STATS_DATA_DIR="$LIFE_HOME/stats/data"
-STATS_EVENTS_FILE="$STATS_DATA_DIR/events/events.jsonl"
+# stats/config.py derives the same directory: $XDG_STATE_HOME/devstats/<project>.
+STATS_DATA_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/devstats/life"
+STATS_EVENTS_FILE="$STATS_DATA_DIR/events.jsonl"
 
 function stats-usage() {
   echo "${green}Stats Commands${reset}"

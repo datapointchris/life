@@ -21,6 +21,7 @@ from rich.console import Console
 from stats.cli.data import date_range
 from stats.cli.data import load_events
 from stats.cli.data import load_snapshot
+from stats.config import load_config
 
 
 def safe_int(value: int | float | str | None, default: int = 0) -> int:
@@ -223,6 +224,6 @@ if __name__ == '__main__':
     if mode == 'code':
         render_code()
     else:
-        stats_data_dir = sys.argv[2] if len(sys.argv) > 2 else 'stats/data'
-        events_file = sys.argv[3] if len(sys.argv) > 3 else 'stats/data/events/events.jsonl'
+        stats_data_dir = sys.argv[2] if len(sys.argv) > 2 else load_config()['data_dir']
+        events_file = sys.argv[3] if len(sys.argv) > 3 else load_config()['events_path']
         render_summary(stats_data_dir, events_file)

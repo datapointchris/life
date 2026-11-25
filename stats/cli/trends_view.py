@@ -18,6 +18,7 @@ from rich.console import Console
 
 from stats.cli.charts import vertical_bars
 from stats.cli.data import load_snapshot
+from stats.config import load_config
 
 
 def git(args: list[str]) -> str:
@@ -251,5 +252,5 @@ def render(data_dir: str, *, console: Console | None = None) -> None:
 
 
 if __name__ == '__main__':
-    stats_data_dir = sys.argv[1] if len(sys.argv) > 1 else 'stats/data'
+    stats_data_dir = sys.argv[1] if len(sys.argv) > 1 else load_config()['data_dir']
     render(stats_data_dir)

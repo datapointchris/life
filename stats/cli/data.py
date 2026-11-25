@@ -2,7 +2,7 @@
 
 Replaces all jq pipelines in ops/stats with Python equivalents.
 Functions read events.jsonl line-by-line with early filtering,
-and load snapshot JSON files for the dashboard views.
+and load the newest snapshot for the dashboard views.
 """
 
 from __future__ import annotations
@@ -157,29 +157,25 @@ def load_events_reversed(
 
 
 def load_snapshot(data_dir: str | Path) -> dict | None:
-    """Load the most recent stats snapshot JSON file.
-
-    Looks for ``stats_*.json`` files in ``data_dir`` and returns the
-    one with the most recent modification time (same as the bash
-    ``stats-latest-file`` function).
+    """Load the newest stats snapshot, the last line of ``snapshots.jsonl`` in ``data_dir``.
 
     Args:
-        data_dir: Directory containing snapshot files
-            (typically ``stats/data/``).
+        data_dir: Directory holding ``snapshots.jsonl``, the config's ``data_dir``.
 
     Returns:
-        Parsed snapshot dict, or ``None`` if no snapshots exist.
+        Parsed snapshot dict, or ``None`` if no snapshot exists.
     """
-    data_path = Path(data_dir)
-    if not data_path.is_dir():
+    path = Path(data_dir) / 'snapshots.jsonl'
+    if not path.is_file():
         return None
 
-    snapshots = sorted(data_path.glob('stats_*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not snapshots:
-        return None
+    last = None
+    with path.open() as f:
+        for line in f:
+            if line.strip():
+                last = line
 
-    with snapshots[0].open() as f:
-        return json.loads(f.read())
+    return json.loads(last) if last else None
 
 
 def events_by_date(events: list[dict]) -> dict[str, list[dict]]:

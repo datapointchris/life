@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Generate stats snapshots from event-sourced JSONL data.
 
-This module aggregates events from stats/data/events/events.jsonl into
-stats_*.json snapshot files that the CLI expects.
+This module aggregates the events in events.jsonl into one snapshot per commit,
+appended as a line to snapshots.jsonl beside it, which the CLI reads.
 """
 
 from __future__ import annotations
@@ -448,26 +448,21 @@ def build_snapshot(
 
 
 def write_snapshot(snapshot: dict, output_dir: str) -> Path:
-    """Write snapshot to a timestamped JSON file.
+    """Append the snapshot to snapshots.jsonl in output_dir as one line.
 
     Args:
         snapshot: The snapshot data
-        output_dir: Directory to write the snapshot
+        output_dir: Directory holding snapshots.jsonl
 
     Returns:
-        Path to the written file
+        Path to snapshots.jsonl
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    filepath = output_path / 'snapshots.jsonl'
 
-    timestamp = dt.datetime.now(dt.UTC).strftime('%Y%m%d_%H%M%S')
-    commit_short = snapshot.get('commit', {}).get('short', 'unknown')
-
-    filename = f'stats_{timestamp}_{commit_short}.json'
-    filepath = output_path / filename
-
-    with filepath.open('w') as f:
-        json.dump(snapshot, f, indent=2)
+    with filepath.open('a') as f:
+        f.write(json.dumps(snapshot, separators=(',', ':')) + '\n')
 
     return filepath
 
@@ -531,7 +526,7 @@ def generate_snapshot(events_path: str | None = None, output_dir: str | None = N
     config = load_config()
 
     if events_path is None:
-        events_path = config.get('events_path', 'stats/data/events/events.jsonl')
+        events_path = config['events_path']
     if output_dir is None:
         output_dir = config['data_dir']
 
@@ -551,7 +546,7 @@ def generate_snapshot(events_path: str | None = None, output_dir: str | None = N
     snapshot = build_snapshot(commit_event, collector_events, hook_events)
     filepath = write_snapshot(snapshot, output_dir)
 
-    print(f'Snapshot written to: {filepath}')
+    print(f'Snapshot appended to: {filepath}')
     return filepath
 
 

@@ -314,7 +314,6 @@ docstring-code-format = true
 
 [tool.devstats]
 project = "life"
-events_path = "stats/data/events/events.jsonl"
 
 [tool.devstats.capture]
 hooks = [

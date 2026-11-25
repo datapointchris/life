@@ -19,6 +19,7 @@ from rich.text import Text
 from stats.cli.charts import bar_str
 from stats.cli.data import events_by_date
 from stats.cli.data import load_events
+from stats.config import load_config
 
 
 def render(events_path: str, days: int = 7, *, console: Console | None = None) -> None:
@@ -95,6 +96,6 @@ def render(events_path: str, days: int = 7, *, console: Console | None = None) -
 
 
 if __name__ == '__main__':
-    events_file = sys.argv[1] if len(sys.argv) > 1 else 'stats/data/events/events.jsonl'
+    events_file = sys.argv[1] if len(sys.argv) > 1 else load_config()['events_path']
     num_days = int(sys.argv[2]) if len(sys.argv) > 2 else 7
     render(events_file, num_days)
