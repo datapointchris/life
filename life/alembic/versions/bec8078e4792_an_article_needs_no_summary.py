@@ -4,8 +4,8 @@ Revision ID: bec8078e4792
 Revises: 2cf648a5eded
 Create Date: 2026-11-24 20:26:08.307667
 
-Saving an article no longer asks a model for a summary, so a saved article has
-none until someone writes one.
+An article may carry no summary, such as one saved from its URL under the
+page's title alone.
 """
 
 import sqlalchemy as sa
