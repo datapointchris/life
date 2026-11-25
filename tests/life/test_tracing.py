@@ -144,16 +144,16 @@ def test_a_queued_import_runs_under_the_request_that_queued_it_and_polling_makes
 ):
     monkeypatch.setattr(article_import_worker, 'tracer', tracer_provider.get_tracer(article_import_worker.__name__))
     redis_client = traced_api.app.state.redis_client
-    redis_client.delete(article_import_worker.QUEUE_KEY, article_import_worker.PAUSE_KEY)
+    redis_client.delete(article_import_worker.QUEUE_KEY)
     caller = {'traceparent': f'00-{CALLER_TRACE_ID}-{CALLER_SPAN_ID}-01', 'baggage': f'caller.flow.id={FLOW_ID}'}
     traced_api.post(f'{API_PREFIX}/articles/bulk-import', json={'urls': ['https://example.com/traced']}, headers=SIGNED_IN | caller)
     (queued_by,) = [s for s in finished_spans() if s.kind == SpanKind.SERVER]
     worker = article_import_worker.ArticleImportWorker(redis_client, test_settings)
 
     span_exporter.clear()
-    _, popped = worker._poll()
+    popped = worker._poll()
     assert finished_spans() == ()
-    with patch.object(article_import_worker, 'summarize_and_create_article', return_value=MagicMock(title='Traced')):
+    with patch.object(article_import_worker, 'save_article_from_url', return_value=MagicMock(title='Traced')):
         worker._process_item(json.loads(popped[1]))
 
     (imported,) = [s for s in finished_spans() if s.name == 'article_import']

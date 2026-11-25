@@ -84,12 +84,10 @@ type ArticleImportResult struct {
 // /articles/bulk-import/{batch_id}). The timestamps are ISO 8601 strings read
 // back out of Redis. They stay strings because the CLI only prints them, and
 // shortTimestamp prints one it cannot parse as written rather than failing the
-// whole decode. ResumesAt is set only while the status is "paused", when the
-// Claude usage limit is holding the queue.
+// whole decode.
 type ArticleBulkImportStatus struct {
 	BatchID     string                `json:"batch_id"`
 	Status      string                `json:"status"`
-	ResumesAt   *string               `json:"resumes_at"`
 	Total       int                   `json:"total"`
 	Processed   int                   `json:"processed"`
 	Succeeded   int                   `json:"succeeded"`

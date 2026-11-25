@@ -28,7 +28,7 @@ from life.api.time_window import TimeWindowQuery
 from life.config import Settings
 from life.config import get_settings
 from life.services.article_creation import ArticleAlreadyExists
-from life.services.article_creation import summarize_and_create_article
+from life.services.article_creation import save_article_from_url
 from life.services.outbound_http import PageFetchError
 from life.services.outbound_http import PageStatusError
 from life.services.row_limit import RowLimit
@@ -137,14 +137,10 @@ def create(article: schemas.ArticleCreate, session: DbSession):
 
 
 @router.post('/create-from-url', response_model=schemas.Article, status_code=status.HTTP_201_CREATED)
-async def create_from_url(
-    body: schemas.ArticleCreateFromUrl,
-    session: DbSession,
-    settings: Settings = Depends(get_settings),
-):
-    """Create an article from a URL. Automatically fetches content, summarizes via AI, and generates tags."""
+def create_from_url(body: schemas.ArticleCreateFromUrl, session: DbSession):
+    """Save the page at a URL under its own title, with no summary."""
     try:
-        return await summarize_and_create_article(body.url, body.notes, session, settings)
+        return save_article_from_url(body.url, body.notes, session)
     except ArticleAlreadyExists as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
     except PAGE_ERRORS as e:

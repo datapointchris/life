@@ -1,20 +1,17 @@
-"""Save an article from its URL: read the page, summarize and tag it, persist it.
+"""Save an article from its URL: read the page for its title, and persist it.
 
 Used by `POST /articles/create-from-url` and the bulk import worker, which the
 endpoint module also enqueues into. Both import this module, so neither has to
-import the other.
+import the other. Reading the page refuses a bot check or a redirect to the
+homepage, which would otherwise be saved under that page's title.
 """
 
 import pendulum
 import structlog
-from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from life import models
-from life import schemas
-from life.ai.assistants.anthropic import AnthropicAssistant
-from life.config import Settings
 from life.services.url_extraction import read_article_page
 from life.util import clean_url
 
@@ -29,8 +26,8 @@ class ArticleAlreadyExists(Exception):
         self.url = url
 
 
-async def summarize_and_create_article(url: str, notes: str | None, session: Session, settings: Settings) -> models.Article:
-    """Fetch URL, summarize via Claude, create article.
+def save_article_from_url(url: str, notes: str | None, session: Session) -> models.Article:
+    """Save the page at `url` under its own title, with no summary and no tags.
 
     It raises domain exceptions and each caller decides what one means: the
     endpoint answers a status, the worker records the message.
@@ -40,20 +37,12 @@ async def summarize_and_create_article(url: str, notes: str | None, session: Ses
     if existing:
         raise ArticleAlreadyExists(url)
 
-    page = await run_in_threadpool(read_article_page, url)
-
-    assistant = AnthropicAssistant(
-        name='Article Summary with Tags',
-        system_prompt=settings.ai.prompts.article_summary_tags,
-        settings=settings,
-    )
-    written = await assistant.generate_structured(page.text, schemas.ArticleSummaryAndTags, max_tokens=8192)
+    page = read_article_page(url)
 
     article = models.Article(
         title=page.title,
         url=url,
-        tags=written.tags,
-        summary=written.summary,
+        tags=[],
         notes=notes,
         save_date=pendulum.now(),
         read_count=0,
