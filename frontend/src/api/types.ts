@@ -390,7 +390,7 @@ export interface ArticleCreate {
   title: string
   url: string
   tags?: string[]
-  summary: string
+  summary?: string
   notes?: string
   save_date: string
   read_count?: number
@@ -403,7 +403,7 @@ export interface ArticleCreate {
 export interface ArticleUpdate {
   title?: string
   tags?: string[]
-  summary?: string
+  summary?: string | null
   notes?: string
   is_favorite?: boolean
   is_current?: boolean
@@ -427,8 +427,7 @@ export interface BulkImportResponse {
 
 export interface BulkImportStatus {
   batch_id: string
-  status: 'queued' | 'processing' | 'paused' | 'completed'
-  resumes_at: string | null
+  status: 'queued' | 'processing' | 'completed'
   total: number
   processed: number
   succeeded: number

@@ -1,14 +1,11 @@
-"""Turn a saved URL into the title and text a summary is written from.
+"""Turn a URL into its page's title and text.
 
-Consumers: `services/article_creation.py` (create from a URL, for the endpoint
-and the bulk import worker), `api/endpoints/articles.py` (summarize, insights)
-and `services/url_ingest.py` (recipe import).
-
-`read_article_page` is the entry point. It refuses a page that is not the
-article: one the site redirected to its homepage or a section index, a bot
-challenge standing in for the page, or a page with too little text to be about
-anything. Each refusal is its own exception, so the import worker records why
-and a caller can branch on which.
+`read_article_page` reads a page's title and text, and `read_article_title` its
+title alone. Both refuse a page that is not the article: one the site
+redirected to its homepage or a section index, or a bot challenge standing in
+for the page. `read_article_page` also refuses a page with too little text to
+be about anything. Each refusal is its own exception, so the import worker
+records why and a caller can branch on which.
 """
 
 import io
@@ -29,6 +26,7 @@ from youtube_transcript_api import RequestBlocked
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 
+from life.services.outbound_http import FetchedPage
 from life.services.outbound_http import get_page
 
 logger = structlog.get_logger()
@@ -297,23 +295,40 @@ def video_captions(url: str) -> str:
         raise VideoHasNoCaptions(url, type(e).__name__) from e
 
 
-def read_article_page(url: str) -> ArticlePage:
-    """Fetch a saved page and return its title and the text to summarize.
+def fetch_article(url: str) -> tuple[FetchedPage, BeautifulSoup | None]:
+    """Fetch a saved page, refusing a redirect away from it and a bot check in its place.
 
-    A YouTube video's text is its captions and a PDF's is its pages. Everything
-    else is extracted from the page, after refusing a redirect away from it and a
-    bot check in its place. Every kind is refused when it has too little text.
+    The soup is None for a PDF, which has no document to parse.
     """
     page = get_page(url).raise_for_status()
     if redirected_away(page.requested_url, page.url):
         raise PageRedirectedAway(url, page.url)
-
     if is_pdf(page.content):
+        return page, None
+    soup = BeautifulSoup(page.content, 'html.parser')
+    if (challenge := bot_challenge_title(soup)) is not None:
+        raise PageIsBotChallenge(url, challenge)
+    return page, soup
+
+
+def read_article_title(url: str) -> str:
+    """Read a saved page's title, with no captions and no word count."""
+    page, soup = fetch_article(url)
+    title = read_pdf(page.content, page.url)[0] if soup is None else get_page_title(soup)
+    return title or page.url
+
+
+def read_article_page(url: str) -> ArticlePage:
+    """Fetch a saved page and return its title and the text to summarize.
+
+    A YouTube video's text is its captions and a PDF's is its pages. Everything
+    else is extracted from the page. Every kind is refused when it has too
+    little text.
+    """
+    page, soup = fetch_article(url)
+    if soup is None:
         title, text = read_pdf(page.content, page.url)
     else:
-        soup = BeautifulSoup(page.content, 'html.parser')
-        if (challenge := bot_challenge_title(soup)) is not None:
-            raise PageIsBotChallenge(url, challenge)
         title = get_page_title(soup)
         text = video_captions(url) if is_youtube_url(url) else extract_main_text(page.content, page.url)
 

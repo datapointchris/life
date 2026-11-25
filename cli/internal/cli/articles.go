@@ -24,11 +24,9 @@ func newArticlesCommand() *cobra.Command {
 			"  life articles show 42        one article in full\n" +
 			"  life articles current        the article being read now",
 	})
-	// Search matches tags only, so it cannot stand alone as the way to find an
-	// article whose tags you do not know.
 	goclikit.WithRecoveryHints(cmd,
 		"List every article: life articles list",
-		"Search articles by tag: life articles search <tag>",
+		"Search articles by title, tag, summary or notes: life articles search <terms>",
 	)
 	splitReadingFromChanging(cmd)
 	cmd.AddGroup(&cobra.Group{ID: groupArticleImports, Title: "Import commands:"})
@@ -54,7 +52,7 @@ func newArticleImportsCommand() *cobra.Command {
 		Use:   "imports",
 		Short: "Follow a bulk-import batch by the id `import` printed",
 		Long: "`life articles import` queues its URLs as one batch and returns at once.\n" +
-			"The articles are fetched and summarized in the background, and the batch\n" +
+			"The articles are fetched and saved in the background, and the batch\n" +
 			"id it printed is how you follow them here.",
 		Example: "  # how far that batch got, and which URLs failed\n" +
 			"  life articles imports status 3297f0e3-85d6-43d7-8a19-cdb0e3cc84a7",
@@ -74,8 +72,9 @@ func newArticlesImportCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import <url> [url...]",
 		Short: "Bulk-import articles from URLs (async)",
-		Long: "Enqueue one or more URLs for background fetch and AI-summarize. Returns a\n" +
-			"batch id — poll it with `life articles imports status <batch-id>`.",
+		Long: "Enqueue one or more URLs to be fetched and saved in the background, each under\n" +
+			"its page's title. Returns a batch id — poll it with\n" +
+			"`life articles imports status <batch-id>`.",
 		Example: "  life articles import https://a.com/post https://b.com/post\n" +
 			"  life articles import https://a.com/post --json",
 		Args: cobra.MinimumNArgs(1),
@@ -135,9 +134,6 @@ func newArticleImportsStatusCommand() *cobra.Command {
 func printBulkImportStatus(out io.Writer, s api.ArticleBulkImportStatus) {
 	_, _ = fmt.Fprintf(out, "batch %s\n", s.BatchID)
 	_, _ = fmt.Fprintf(out, "  status:    %s\n", s.Status)
-	if s.ResumesAt != nil {
-		_, _ = fmt.Fprintf(out, "  resumes:   %s (Claude usage limit)\n", shortTimestamp(*s.ResumesAt))
-	}
 	_, _ = fmt.Fprintf(out, "  progress:  %d/%d processed\n", s.Processed, s.Total)
 	_, _ = fmt.Fprintf(out, "  succeeded: %d\n", s.Succeeded)
 	_, _ = fmt.Fprintf(out, "  failed:    %d\n", s.FailedCount)
@@ -211,9 +207,10 @@ func newArticlesListCommand() *cobra.Command {
 func newArticlesSearchCommand() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     "search <tag>",
-		Short:   "Search articles by tag",
-		Long:    "Comma-separated terms are matched independently (\"python,databases\" finds\narticles tagged with either).",
+		Use:   "search <terms>",
+		Short: "Search articles by title, tag, summary or notes",
+		Long: "Each comma-separated term matches part of an article's title, tags, summary\n" +
+			"or notes, ignoring case (\"python,databases\" finds articles that mention either).",
 		Example: "  life articles search databases\n  life articles search \"python,systems\"",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -297,7 +294,7 @@ func newArticlesCreateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create --url <url> [--notes <notes>]",
 		Short: "Save an article from a URL",
-		Long:  "Fetch the URL and AI-summarize it into a new article (title, summary, tags\nare generated server-side).",
+		Long:  "Fetch the URL and save it as a new article under its page's title, with no\nsummary and no tags.",
 		Example: "  life articles create --url https://example.com/post\n" +
 			"  life articles create --url https://example.com/post --notes \"for the DB deep-dive\"",
 		Args: cobra.NoArgs,

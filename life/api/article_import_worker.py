@@ -10,18 +10,12 @@ Queue item format (JSON string in Redis list):
 Batch status (Redis hash at article_import:batch:{batch_id}):
     status, total, processed, succeeded, failed_count, errors (JSON), results (JSON),
     created_at, updated_at. It expires BATCH_TTL after the batch completes, so a
-    batch still waiting — behind a backlog, a paused queue or a stopped worker —
-    keeps its status for as long as the wait lasts.
-
-Pause (Redis string at article_import:paused_until):
-    the ISO time the Claude usage limit resets, expiring at that time. While it
-    exists no worker takes an item, and every unfinished batch reads as paused.
+    batch still waiting — behind a backlog or a stopped worker — keeps its status
+    for as long as the wait lasts.
 """
 
-import asyncio
 import datetime as dt
 import json
-import math
 import threading
 import uuid
 from typing import Any
@@ -33,12 +27,11 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.utils import suppress_instrumentation
 from opentelemetry.trace import SpanKind
 
-from life.ai.assistants.anthropic import AssistantUsageLimitReached
 from life.config import Settings
 from life.database.session import create_session
 from life.models.record_change import bind_actor
 from life.services.article_creation import ArticleAlreadyExists
-from life.services.article_creation import summarize_and_create_article
+from life.services.article_creation import save_article_from_url
 from life.services.outbound_http import PageStatusError
 from life.services.url_extraction import CaptionsBlocked
 from life.services.url_extraction import PageUnreadable
@@ -49,15 +42,12 @@ tracer = trace.get_tracer(__name__)
 
 QUEUE_KEY = 'article_import:queue'
 BATCH_KEY_PREFIX = 'article_import:batch:'
-PAUSE_KEY = 'article_import:paused_until'
 BATCH_TTL = 86400  # 24 hours
 MAX_ATTEMPTS = 2
 QUEUE_WAIT_SECONDS = 5
 # `blpop` leaves the socket silent for up to QUEUE_WAIT_SECONDS, so a read timeout at or below it
 # raises TimeoutError on every poll of an empty queue.
 QUEUE_READ_TIMEOUT_SECONDS = QUEUE_WAIT_SECONDS * 2
-# How long to hold the queue when the usage limit gives no reset time.
-USAGE_LIMIT_RECHECK = dt.timedelta(minutes=15)
 
 
 def worth_retrying(error: Exception) -> bool:
@@ -127,12 +117,9 @@ def get_batch_status(redis_client: redis.Redis, batch_id: str) -> dict | None:
     data = redis_client.hgetall(batch_key)
     if not data:
         return None
-    paused_until = redis_client.get(PAUSE_KEY)
-    paused = paused_until is not None and data['status'] != 'completed'
     return {
         'batch_id': batch_id,
-        'status': 'paused' if paused else data['status'],
-        'resumes_at': paused_until if paused else None,
+        'status': data['status'],
         'total': int(data['total']),
         'processed': int(data['processed']),
         'succeeded': int(data['succeeded']),
@@ -167,10 +154,7 @@ class ArticleImportWorker:
     def _run(self):
         while not self._stop_event.is_set():
             try:
-                pause_seconds, result = self._poll()
-                if pause_seconds > 0:
-                    self._stop_event.wait(timeout=pause_seconds)
-                    continue
+                result = self._poll()
                 if result is None:
                     continue
                 _, item_json = result
@@ -181,16 +165,14 @@ class ArticleImportWorker:
                 if self._stop_event.wait(timeout=2):
                     break
 
-    def _poll(self) -> tuple[int, Any]:
-        """The pause's remaining seconds, or the next item once one arrives within QUEUE_WAIT_SECONDS.
+    def _poll(self) -> Any:
+        """The next item, once one arrives within QUEUE_WAIT_SECONDS.
 
         It makes no span. Every worker polls an empty queue every few seconds, and
         each poll's Redis commands would otherwise be a trace of their own.
         """
         with suppress_instrumentation():
-            if (pause_seconds := self.redis_client.ttl(PAUSE_KEY)) > 0:
-                return pause_seconds, None
-            return 0, self.redis_client.blpop(QUEUE_KEY, timeout=QUEUE_WAIT_SECONDS)
+            return self.redis_client.blpop(QUEUE_KEY, timeout=QUEUE_WAIT_SECONDS)
 
     def _process_item(self, item: dict):
         """Import one item inside a span under the request that queued it."""
@@ -219,10 +201,8 @@ class ArticleImportWorker:
             with structlog.contextvars.bound_contextvars(request_id=item.get('request_id')), create_session(self.settings) as session:
                 if actor := item.get('actor'):
                     bind_actor(session, actor)
-                article = asyncio.run(summarize_and_create_article(url, notes, session, self.settings))
+                article = save_article_from_url(url, notes, session)
                 self._record_success(batch_key, url, article.title)
-        except AssistantUsageLimitReached as e:
-            self._hold_for_usage_limit(item, e)
         except Exception as e:
             error_msg = str(e)
             logger.warning('article_import_item_failed', url=url, attempt=attempt, error=error_msg)
@@ -242,23 +222,6 @@ class ArticleImportWorker:
         imports the URL but leaves a missing batch's status alone.
         """
         return bool(self.redis_client.exists(batch_key))
-
-    def _hold_for_usage_limit(self, item: dict, limit: AssistantUsageLimitReached):
-        """Put the item back at the head of the queue and pause the queue until the limit resets.
-
-        The item keeps its attempt count, because the limit refused the call rather
-        than the page or the reply failing. The pause lives in Redis and expires at
-        the reset, so a worker that restarts meanwhile holds too.
-        """
-        now = dt.datetime.now(dt.UTC)
-        resumes_at = limit.resets_at if limit.resets_at is not None and limit.resets_at > now else now + USAGE_LIMIT_RECHECK
-        pause_seconds = math.ceil((resumes_at - now).total_seconds())
-
-        pipeline = self.redis_client.pipeline()
-        pipeline.lpush(QUEUE_KEY, json.dumps(item))
-        pipeline.set(PAUSE_KEY, resumes_at.isoformat(), ex=pause_seconds)
-        pipeline.execute()
-        logger.warning('article_import_paused', url=item['url'], resumes_at=resumes_at.isoformat(), limit_type=limit.limit_type)
 
     def _record_success(self, batch_key: str, url: str, title: str):
         if not self._batch_exists(batch_key):

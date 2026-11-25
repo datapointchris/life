@@ -30,9 +30,8 @@ type Article struct {
 }
 
 // ArticleCreateFromURLInput is the body for POST /articles/create-from-url. The
-// server fetches the URL and AI-summarizes it to fill title/summary/tags — the
-// only create path the CLI exposes, since the raw POST demands a hand-written
-// title and summary.
+// server fetches the URL and saves it under the page's title — the only create
+// path the CLI exposes, since the raw POST demands a hand-written title.
 type ArticleCreateFromURLInput struct {
 	URL   string  `json:"url"`
 	Notes *string `json:"notes,omitempty"`
@@ -55,8 +54,8 @@ type ArticleUpdateInput struct {
 }
 
 // ArticleBulkImportInput is the body for POST /articles/bulk-import — a list of
-// URLs to fetch and AI-summarize asynchronously. The server returns a batch id to
-// poll for progress.
+// URLs to fetch and save asynchronously. The server returns a batch id to poll
+// for progress.
 type ArticleBulkImportInput struct {
 	URLs []string `json:"urls"`
 }
@@ -84,12 +83,10 @@ type ArticleImportResult struct {
 // /articles/bulk-import/{batch_id}). The timestamps are ISO 8601 strings read
 // back out of Redis. They stay strings because the CLI only prints them, and
 // shortTimestamp prints one it cannot parse as written rather than failing the
-// whole decode. ResumesAt is set only while the status is "paused", when the
-// Claude usage limit is holding the queue.
+// whole decode.
 type ArticleBulkImportStatus struct {
 	BatchID     string                `json:"batch_id"`
 	Status      string                `json:"status"`
-	ResumesAt   *string               `json:"resumes_at"`
 	Total       int                   `json:"total"`
 	Processed   int                   `json:"processed"`
 	Succeeded   int                   `json:"succeeded"`
@@ -100,7 +97,7 @@ type ArticleBulkImportStatus struct {
 	UpdatedAt   string                `json:"updated_at"`
 }
 
-// BulkImportArticles enqueues URLs for async fetch + AI-summarize (POST
+// BulkImportArticles enqueues URLs to fetch and save asynchronously (POST
 // /articles/bulk-import → 202). Returns the batch handle for polling.
 func (c *Client) BulkImportArticles(ctx context.Context, urls []string) (ArticleBulkImportBatch, error) {
 	var batch ArticleBulkImportBatch
@@ -153,7 +150,7 @@ func (c *Client) GetCurrentArticle(ctx context.Context) (*Article, error) {
 	return article, nil
 }
 
-// SearchArticles returns articles whose tags match q (GET /articles/search?q=).
+// SearchArticles returns articles whose title, tags, summary or notes match q (GET /articles/search?q=).
 // Comma-separated terms are matched independently (OR).
 func (c *Client) SearchArticles(ctx context.Context, q string) ([]Article, error) {
 	path := "/articles/search?" + url.Values{"q": {q}}.Encode()
@@ -164,8 +161,8 @@ func (c *Client) SearchArticles(ctx context.Context, q string) ([]Article, error
 	return articles, nil
 }
 
-// CreateArticleFromURL creates an article by fetching and AI-summarizing a URL
-// (POST /articles/create-from-url). A duplicate URL is a 409.
+// CreateArticleFromURL creates an article by fetching a URL and saving it under
+// the page's title (POST /articles/create-from-url). A held URL is a 409.
 func (c *Client) CreateArticleFromURL(ctx context.Context, in ArticleCreateFromURLInput) (Article, error) {
 	var article Article
 	if err := c.send(ctx, http.MethodPost, "/articles/create-from-url", in, &article); err != nil {

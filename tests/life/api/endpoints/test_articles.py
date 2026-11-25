@@ -1,7 +1,5 @@
-import asyncio
 import datetime as dt
 import json
-import time
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -16,17 +14,13 @@ from life.ai.assistants.anthropic import AssistantOutputError
 from life.ai.assistants.anthropic import AssistantUsageLimitReached
 from life.api.article_import_worker import BATCH_KEY_PREFIX
 from life.api.article_import_worker import BATCH_TTL
-from life.api.article_import_worker import PAUSE_KEY
 from life.api.article_import_worker import QUEUE_KEY
-from life.api.article_import_worker import USAGE_LIMIT_RECHECK
 from life.api.article_import_worker import ArticleImportWorker
 from life.api.article_import_worker import enqueue_bulk_import
 from life.config import get_settings
-from life.services.article_creation import summarize_and_create_article
 from life.services.outbound_http import PageFetchError
 from life.services.outbound_http import PageStatusError
 from life.services.url_extraction import ArticlePage
-from life.services.url_extraction import CaptionsBlocked
 from tests.util import show_status_and_response
 from tests.utils.database import insert_test_data_transactional
 from tests.utils.database import test_settings
@@ -118,11 +112,10 @@ def test_search(article_crud_tester):
     )
     response = client.post(ENDPOINT, json=searchable_article.model_dump(mode='json'))
     assert response.status_code == status.HTTP_201_CREATED, show_status_and_response(response)
-    response = client.get(f'{ENDPOINT}/search', params={'q': 'test-search'})
-    assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
-    articles = response.json()
-    assert len(articles) > 0
-    assert any(article['title'] == 'Searchable Article' for article in articles)
+    for term in ('test-search', 'searchable'):
+        response = client.get(f'{ENDPOINT}/search', params={'q': term})
+        assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
+        assert any(article['title'] == 'Searchable Article' for article in response.json()), term
 
 
 @patch('life.api.endpoints.articles.read_article_page')
@@ -406,12 +399,18 @@ def test_read_many_returns_empty_list_when_no_articles(txn_api_logged_in):
 # ---------------------------------------------------------------------------
 
 
-def test_create_article_without_summary_returns_422(txn_api_logged_in):
-    """POST /articles without summary returns 422 (summary is required)."""
+def test_an_article_saved_without_a_summary_or_cleared_of_one_reads_back_with_none(txn_api_logged_in):
     client, _ = txn_api_logged_in
     payload = {'title': 'No Summary', 'url': 'http://nosummary.com', 'save_date': str(dt.datetime.now(dt.UTC))}
-    response = client.post(ENDPOINT, json=payload)
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, show_status_and_response(response)
+    unwritten = client.post(ENDPOINT, json=payload)
+    assert unwritten.status_code == status.HTTP_201_CREATED, show_status_and_response(unwritten)
+    written = client.post(ENDPOINT, json=payload | {'url': 'http://summarized.com', 'summary': 'Written'}).json()
+    cleared = client.patch(f'{ENDPOINT}/{written["id"]}', json={'summary': None})
+    assert cleared.status_code == status.HTTP_200_OK, show_status_and_response(cleared)
+    for article_id in (unwritten.json()['id'], written['id']):
+        response = client.get(f'{ENDPOINT}/{article_id}')
+        assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
+        assert response.json()['summary'] is None
 
 
 def test_create_article_without_save_date_returns_422(txn_api_logged_in):
@@ -420,6 +419,63 @@ def test_create_article_without_save_date_returns_422(txn_api_logged_in):
     payload = {'title': 'No Date', 'url': 'http://nodate.com', 'summary': 'Some summary'}
     response = client.post(ENDPOINT, json=payload)
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, show_status_and_response(response)
+
+
+class TestCreateUnderASourceKey:
+    BODY = {'title': 'A saved post', 'url': 'https://example.com/saved-post', 'save_date': '2026-11-20T15:04:05Z', 'source_key': 'post/abc'}
+
+    def test_a_repeat_of_the_body_answers_the_article_it_saved(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        first = client.post(ENDPOINT, json=self.BODY)
+        assert first.status_code == status.HTTP_201_CREATED, show_status_and_response(first)
+        again = client.post(ENDPOINT, json=self.BODY | {'save_date': '2026-11-20T10:04:05-05:00'})
+        assert again.status_code == status.HTTP_200_OK, show_status_and_response(again)
+        assert again.json()['id'] == first.json()['id']
+        assert again.json()['adopted'] is False
+
+    def test_another_body_under_the_key_answers_409_naming_the_article_and_changes_nothing(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        first = client.post(ENDPOINT, json=self.BODY).json()
+        refused = client.post(ENDPOINT, json=self.BODY | {'title': 'Retitled'})
+        assert refused.status_code == status.HTTP_409_CONFLICT, show_status_and_response(refused)
+        assert refused.json() | {'message': ''} == {
+            'error': 'Conflict',
+            'message': '',
+            'conflict': 'source_key',
+            'article_id': first['id'],
+            'source_key': 'post/abc',
+        }
+        assert client.get(f'{ENDPOINT}/{first["id"]}').json()['title'] == 'A saved post'
+
+    def test_a_url_saved_by_hand_is_adopted_and_a_repeat_still_answers_it(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        by_hand = {'title': 'My own title', 'url': self.BODY['url'], 'notes': 'kept', 'save_date': '2026-11-01T00:00:00Z'}
+        saved = client.post(ENDPOINT, json=by_hand).json()
+
+        adopted = client.post(ENDPOINT, json=self.BODY)
+        assert adopted.status_code == status.HTTP_200_OK, show_status_and_response(adopted)
+        assert adopted.json() | {'title': 'My own title', 'notes': 'kept', 'source_key': 'post/abc', 'adopted': True} == adopted.json()
+        assert adopted.json()['id'] == saved['id']
+
+        again = client.post(ENDPOINT, json=self.BODY)
+        assert again.status_code == status.HTTP_200_OK, show_status_and_response(again)
+        assert again.json()['id'] == saved['id']
+
+    def test_a_url_held_under_another_key_answers_409(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        held = client.post(ENDPOINT, json=self.BODY).json()
+        refused = client.post(ENDPOINT, json=self.BODY | {'source_key': 'post/other'})
+        assert refused.status_code == status.HTTP_409_CONFLICT, show_status_and_response(refused)
+        body = refused.json()
+        assert (body['conflict'], body['article_id'], body['source_key']) == ('url', held['id'], 'post/abc')
+
+    def test_a_plain_create_of_a_held_url_answers_409(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        held = client.post(ENDPOINT, json=NEW_OBJ.model_dump(mode='json')).json()
+        refused = client.post(ENDPOINT, json=NEW_OBJ.model_dump(mode='json') | {'title': 'Another'})
+        assert refused.status_code == status.HTTP_409_CONFLICT, show_status_and_response(refused)
+        body = refused.json()
+        assert (body['conflict'], body['article_id'], body['source_key']) == ('url', held['id'], None)
 
 
 def test_a_title_is_stored_on_one_line(txn_api_logged_in):
@@ -465,46 +521,33 @@ def test_a_page_request_without_a_url_names_the_field(txn_api_logged_in, route, 
 class TestCreateFromUrl:
     """Tests for POST /articles/create-from-url endpoint."""
 
-    def _mock_externals(self, generate_raises: Exception | None = None):
-        """Return the page-fetch and assistant patch context managers."""
-        mock_assistant = MagicMock()
-        if generate_raises is not None:
-            mock_assistant.generate_structured = AsyncMock(side_effect=generate_raises)
-        else:
-            written = schemas.ArticleSummaryAndTags(summary='A test summary.', tags=['python', 'testing'])
-            mock_assistant.generate_structured = AsyncMock(return_value=written)
+    def page_read(self, **kwargs):
+        return patch(f'{CREATION_MODULE}.read_article_title', **({'return_value': PAGE.title} | kwargs))
 
-        get_page_patch = patch(f'{CREATION_MODULE}.read_article_page', return_value=PAGE)
-        return get_page_patch, patched_assistant(mock_assistant, CREATION_MODULE)
-
-    def test_create_from_url(self, txn_api_logged_in):
-        """Create article from URL: fetches, summarizes, persists."""
+    def test_create_from_url_saves_the_page_title_and_no_summary(self, txn_api_logged_in):
         client, _ = txn_api_logged_in
-        get_page_patch, assistant_patch = self._mock_externals()
-        with get_page_patch, assistant_patch:
+        with self.page_read():
             response = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/test'})
         assert response.status_code == status.HTTP_201_CREATED, show_status_and_response(response)
         data = response.json()
         assert data['title'] == 'Test Article'
-        assert data['summary'] == 'A test summary.'
-        assert data['tags'] == ['python', 'testing']
+        assert data['summary'] is None
+        assert data['tags'] == []
         assert data['save_date'] is not None
 
-    def test_create_from_url_duplicate_returns_409(self, txn_api_logged_in):
-        """Duplicate URL returns 409 Conflict."""
+    def test_a_held_url_answers_the_create_routes_409_naming_the_article(self, txn_api_logged_in):
         client, _ = txn_api_logged_in
-        get_page_patch, assistant_patch = self._mock_externals()
-        with get_page_patch, assistant_patch:
-            response1 = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dup'})
-            assert response1.status_code == status.HTTP_201_CREATED
-            response2 = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dup'})
-            assert response2.status_code == status.HTTP_409_CONFLICT
+        with self.page_read():
+            held = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dup'})
+            assert held.status_code == status.HTTP_201_CREATED, show_status_and_response(held)
+            refused = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dup'})
+        assert refused.status_code == status.HTTP_409_CONFLICT, show_status_and_response(refused)
+        body = refused.json()
+        assert (body['conflict'], body['article_id'], body['source_key']) == ('url', held.json()['id'], None)
 
     def test_create_from_url_with_notes(self, txn_api_logged_in):
-        """Notes are persisted alongside the auto-summary."""
         client, _ = txn_api_logged_in
-        get_page_patch, assistant_patch = self._mock_externals()
-        with get_page_patch, assistant_patch:
+        with self.page_read():
             response = client.post(
                 f'{ENDPOINT}/create-from-url',
                 json={'url': 'https://example.com/noted', 'notes': 'Read later'},
@@ -517,77 +560,39 @@ class TestCreateFromUrl:
         [
             PageFetchError('https://example.com/dead', 'connection refused'),
             PageStatusError('https://example.com/dead', 403),
-            CaptionsBlocked('https://www.youtube.com/watch?v=abc'),
         ],
-        ids=['unreachable', 'refused', 'captions-blocked'],
+        ids=['unreachable', 'refused'],
     )
     def test_create_from_url_reports_a_failing_site_as_a_failed_dependency(self, txn_api_logged_in, failure):
         """The detail names what failed, which is what a caller needs to decide whether to retry."""
         client, _ = txn_api_logged_in
-        _, assistant_patch = self._mock_externals()
-        with patch(f'{CREATION_MODULE}.read_article_page', side_effect=failure), assistant_patch:
+        with self.page_read(side_effect=failure):
             response = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dead'})
         assert response.status_code == status.HTTP_424_FAILED_DEPENDENCY, show_status_and_response(response)
         assert response.json()['message'] == str(failure)
 
-    def test_create_from_url_reports_invalid_output_as_a_failed_dependency(self, txn_api_logged_in):
-        """The raw output comes back, so prompt drift is diagnosable without the logs."""
-        client, _ = txn_api_logged_in
-        invalid = AssistantOutputError(
-            AssistantFailure.INVALID_OUTPUT, 'not a valid ArticleSummaryAndTags', 'I could not summarize that page.'
-        )
-        get_page_patch, assistant_patch = self._mock_externals(generate_raises=invalid)
-        with get_page_patch, assistant_patch:
-            response = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/prose'})
-        assert response.status_code == status.HTTP_424_FAILED_DEPENDENCY, show_status_and_response(response)
-        body = response.json()
-        assert body['reason'] == AssistantFailure.INVALID_OUTPUT
-        assert body['raw_assistant_output'] == 'I could not summarize that page.'
 
-    def test_create_from_url_reports_a_truncated_reply_as_a_failed_dependency(self, txn_api_logged_in):
-        """A reply stopped at the cap is a fragment, and must not be saved as an article."""
-        client, _ = txn_api_logged_in
-        truncated = AssistantOutputError(AssistantFailure.TRUNCATED, 'cap reached', '{"summary": "half a sum')
-        get_page_patch, assistant_patch = self._mock_externals(generate_raises=truncated)
-        with get_page_patch, assistant_patch:
-            response = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/truncated'})
-        assert response.status_code == status.HTTP_424_FAILED_DEPENDENCY, show_status_and_response(response)
-        assert response.json()['reason'] == AssistantFailure.TRUNCATED
+def summarize_refused_by(limit: AssistantUsageLimitReached, client):
+    mock_assistant = MagicMock()
+    mock_assistant.generate_structured = AsyncMock(side_effect=limit)
+    with patch(f'{ENDPOINT_MODULE}.read_article_page', return_value=PAGE), patched_assistant(mock_assistant):
+        return client.post(f'{ENDPOINT}/summarize', json={'url': 'https://example.com/limited'})
 
-    def test_an_unusable_reply_gives_the_bulk_worker_a_short_message(self, txn_api_logged_in):
-        """The worker records str(e) in a database column and a Redis payload.
 
-        An HTTPException stringifies as '424: {…}', so raising one from the
-        shared helper would put the model's whole reply in both.
-        """
-        client, session = txn_api_logged_in
-        long_reply = 'x' * 4000
-        invalid = AssistantOutputError(AssistantFailure.INVALID_OUTPUT, 'not a valid ArticleSummaryAndTags', long_reply)
-        get_page_patch, assistant_patch = self._mock_externals(generate_raises=invalid)
-        with get_page_patch, assistant_patch, pytest.raises(AssistantOutputError) as caught:
-            asyncio.run(summarize_and_create_article('https://example.com/worker', None, session, get_settings()))
-        assert len(str(caught.value)) < 200, 'the worker would record this whole string'
-        assert caught.value.raw_output == long_reply, 'the raw reply is still reachable for a 424'
+def test_a_summary_refused_by_the_usage_limit_answers_when_to_retry(txn_api_logged_in):
+    """A refused call succeeds once the plan resets, so the answer is a 503 that says when."""
+    client, _ = txn_api_logged_in
+    resets_at = dt.datetime(2026, 9, 18, 3, 0, tzinfo=dt.UTC)
+    response = summarize_refused_by(AssistantUsageLimitReached('Article Summary with Tags', resets_at, 'five_hour'), client)
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, show_status_and_response(response)
+    assert response.headers['Retry-After'] == 'Fri, 18 Sep 2026 03:00:00 GMT'
 
-    def test_create_from_url_answers_a_usage_limit_with_when_to_retry(self, txn_api_logged_in):
-        """A refused call succeeds once the plan resets, so the answer is a 503 that says when."""
-        client, _ = txn_api_logged_in
-        resets_at = dt.datetime(2026, 9, 18, 3, 0, tzinfo=dt.UTC)
-        limit = AssistantUsageLimitReached('Article Summary with Tags', resets_at, 'five_hour')
-        get_page_patch, assistant_patch = self._mock_externals(generate_raises=limit)
-        with get_page_patch, assistant_patch:
-            response = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/limited'})
-        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, show_status_and_response(response)
-        assert response.headers['Retry-After'] == 'Fri, 18 Sep 2026 03:00:00 GMT'
 
-    def test_a_usage_limit_with_no_reset_time_sends_no_retry_after(self, txn_api_logged_in):
-        client, _ = txn_api_logged_in
-        limit = AssistantUsageLimitReached('Article Summary with Tags', None, None)
-        get_page_patch, assistant_patch = self._mock_externals(generate_raises=limit)
-        with get_page_patch, assistant_patch:
-            response = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/limited'})
-        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, show_status_and_response(response)
-        assert 'Retry-After' not in response.headers
+def test_a_usage_limit_with_no_reset_time_sends_no_retry_after(txn_api_logged_in):
+    client, _ = txn_api_logged_in
+    response = summarize_refused_by(AssistantUsageLimitReached('Article Summary with Tags', None, None), client)
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, show_status_and_response(response)
+    assert 'Retry-After' not in response.headers
 
 
 # ---------------------------------------------------------------------------
@@ -652,10 +657,8 @@ class TestBulkImport:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
-class TestBulkImportUsageLimit:
-    """The worker holds the queue when the Claude plan's usage limit refuses a call."""
-
-    SUMMARIZE = 'life.api.article_import_worker.summarize_and_create_article'
+class TestBulkImportWorker:
+    SAVE = 'life.api.article_import_worker.save_article_from_url'
 
     def take_first_item(self, redis_client: redis.Redis) -> dict:
         popped = redis_client.blpop(QUEUE_KEY, timeout=1)
@@ -663,48 +666,15 @@ class TestBulkImportUsageLimit:
         _, item_json = popped
         return json.loads(item_json)
 
-    def test_the_refused_item_goes_back_first_and_the_queue_pauses_until_the_reset(self, test_redis):
-        batch_id = enqueue_bulk_import(
-            test_redis, ['https://example.com/first', 'https://example.com/second'], actor='importer@example.com'
-        )
-        worker = ArticleImportWorker(test_redis, get_settings())
-        item = self.take_first_item(test_redis)
-        resets_at = dt.datetime.now(dt.UTC) + dt.timedelta(hours=2)
-        limit = AssistantUsageLimitReached('Article Summary with Tags', resets_at, 'five_hour')
-
-        with patch(self.SUMMARIZE, side_effect=limit):
-            worker._process_item(item)
-
-        batch_key = f'{BATCH_KEY_PREFIX}{batch_id}'
-        assert json.loads(test_redis.lindex(QUEUE_KEY, 0)) == item, 'the refused item keeps its place and its attempt count'
-        assert test_redis.llen(QUEUE_KEY) == 2
-        assert test_redis.get(PAUSE_KEY) == resets_at.isoformat()
-        assert 7100 < test_redis.ttl(PAUSE_KEY) <= 7200, 'the pause expires when the limit resets'
-        assert test_redis.ttl(batch_key) == -1, 'a batch still waiting has no expiry for the pause to outlast'
-        assert test_redis.hget(batch_key, 'failed_count') == '0', 'a refused call is not a failed import'
-
-    def test_a_limit_with_no_reset_time_holds_the_queue_for_the_recheck_interval(self, test_redis):
-        enqueue_bulk_import(test_redis, ['https://example.com/only'], actor='importer@example.com')
-        worker = ArticleImportWorker(test_redis, get_settings())
-        item = self.take_first_item(test_redis)
-
-        with patch(self.SUMMARIZE, side_effect=AssistantUsageLimitReached('Article Summary with Tags', None, None)):
-            worker._process_item(item)
-
-        recheck_seconds = int(USAGE_LIMIT_RECHECK.total_seconds())
-        assert recheck_seconds - 5 < test_redis.ttl(PAUSE_KEY) <= recheck_seconds
-
-    def test_a_batch_enqueued_during_a_long_pause_keeps_its_status_until_it_completes(self, test_redis):
-        """A weekly limit can hold the queue for days, longer than a completed batch's status is kept."""
-        pause_seconds = 3 * BATCH_TTL
-        test_redis.set(PAUSE_KEY, (dt.datetime.now(dt.UTC) + dt.timedelta(seconds=pause_seconds)).isoformat(), ex=pause_seconds)
+    def test_a_batch_keeps_its_status_until_it_completes_and_then_for_a_day(self, test_redis):
+        """A batch can wait behind a backlog or a stopped worker for longer than a completed batch is kept."""
         batch_id = enqueue_bulk_import(test_redis, ['https://example.com/late'], actor='importer@example.com')
         batch_key = f'{BATCH_KEY_PREFIX}{batch_id}'
         assert test_redis.ttl(batch_key) == -1, 'the batch would expire while its URL still waits'
 
         worker = ArticleImportWorker(test_redis, get_settings())
         item = self.take_first_item(test_redis)
-        with patch(self.SUMMARIZE, return_value=MagicMock(title='Late')):
+        with patch(self.SAVE, return_value=MagicMock(title='Late')):
             worker._process_item(item)
 
         assert test_redis.hget(batch_key, 'status') == 'completed'
@@ -718,44 +688,8 @@ class TestBulkImportUsageLimit:
         test_redis.delete(batch_key)
         worker = ArticleImportWorker(test_redis, get_settings())
 
-        with patch(self.SUMMARIZE, return_value=MagicMock(title='Orphan')) as summarize:
+        with patch(self.SAVE, return_value=MagicMock(title='Orphan')) as save:
             worker._process_item(item)
 
-        summarize.assert_called_once()
+        save.assert_called_once()
         assert test_redis.exists(batch_key) == 0
-
-    def test_a_paused_worker_takes_nothing_from_the_queue(self, test_redis):
-        """A pause in Redis holds every worker, including one started after the limit was hit."""
-        enqueue_bulk_import(test_redis, ['https://example.com/waiting'], actor='importer@example.com')
-        test_redis.set(PAUSE_KEY, (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=1)).isoformat(), ex=60)
-        worker = ArticleImportWorker(test_redis, get_settings())
-
-        with patch(self.SUMMARIZE, return_value=MagicMock(title='Taken')):
-            worker.start()
-            try:
-                time.sleep(0.5)
-                assert test_redis.llen(QUEUE_KEY) == 1, 'the worker took an item while paused'
-            finally:
-                worker.stop()
-
-    def test_a_paused_batch_reports_when_it_resumes(self, api_with_redis, test_redis):
-        client, _ = api_with_redis
-        batch_id = client.post(f'{ENDPOINT}/bulk-import', json={'urls': ['https://example.com/held']}).json()['batch_id']
-        resumes_at = (dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)).isoformat()
-        test_redis.set(PAUSE_KEY, resumes_at, ex=3600)
-
-        data = client.get(f'{ENDPOINT}/bulk-import/{batch_id}').json()
-
-        assert data['status'] == 'paused'
-        assert data['resumes_at'] == resumes_at
-
-    def test_a_completed_batch_is_not_reported_paused(self, api_with_redis, test_redis):
-        client, _ = api_with_redis
-        batch_id = client.post(f'{ENDPOINT}/bulk-import', json={'urls': ['https://example.com/done']}).json()['batch_id']
-        test_redis.hset(f'{BATCH_KEY_PREFIX}{batch_id}', 'status', 'completed')
-        test_redis.set(PAUSE_KEY, (dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)).isoformat(), ex=3600)
-
-        data = client.get(f'{ENDPOINT}/bulk-import/{batch_id}').json()
-
-        assert data['status'] == 'completed'
-        assert data['resumes_at'] is None

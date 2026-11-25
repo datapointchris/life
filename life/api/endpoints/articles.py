@@ -27,8 +27,10 @@ from life.api.exceptions import NotFoundException
 from life.api.time_window import TimeWindowQuery
 from life.config import Settings
 from life.config import get_settings
-from life.services.article_creation import ArticleAlreadyExists
-from life.services.article_creation import summarize_and_create_article
+from life.services.article_creation import ArticleHeld
+from life.services.article_creation import SaveOutcome
+from life.services.article_creation import save_article
+from life.services.article_creation import save_article_from_url
 from life.services.outbound_http import PageFetchError
 from life.services.outbound_http import PageStatusError
 from life.services.row_limit import RowLimit
@@ -127,26 +129,62 @@ def read_one_url(url: str, session: DbSession):
     raise NotFoundException('article', f'url={url}', logger)
 
 
-@router.post('', response_model=schemas.Article, status_code=status.HTTP_201_CREATED)
-def create(article: schemas.ArticleCreate, session: DbSession):
-    obj = models.Article(**article.model_dump())
-    session.add(obj)
-    session.commit()
-    session.refresh(obj)
-    return obj
+def held_conflict(e: ArticleHeld) -> HTTPException:
+    """The 409 `schemas.ArticleConflict` declares, naming the article the save met."""
+    detail = {'message': str(e), 'conflict': e.conflict, 'article_id': e.held.id, 'source_key': e.held.source_key}
+    logger.info('article_create_conflict', **detail)
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
 
-@router.post('/create-from-url', response_model=schemas.Article, status_code=status.HTTP_201_CREATED)
-async def create_from_url(
-    body: schemas.ArticleCreateFromUrl,
-    session: DbSession,
-    settings: Settings = Depends(get_settings),
-):
-    """Create an article from a URL. Automatically fetches content, summarizes via AI, and generates tags."""
+HELD_RESPONSE = {'model': schemas.ArticleConflict, 'description': 'The URL is held, or the source_key holds another body'}
+
+
+@router.post(
+    '',
+    response_model=schemas.ArticleSaved,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_200_OK: {
+            'model': schemas.ArticleSaved,
+            'description': (
+                'The article this source_key or URL already names. With `adopted: true` the article was saved by hand under no '
+                'key: it took the key and kept its own fields, so nothing else in the body was applied.'
+            ),
+        },
+        status.HTTP_409_CONFLICT: HELD_RESPONSE,
+    },
+)
+def create(article: schemas.ArticleCreate, session: DbSession, response: Response):
+    """Save an article, or answer the one its `source_key` or URL already names.
+
+    Without a `source_key` a held URL answers 409. With one, a repeat of the
+    body that saved it answers 200 and that article, and any other body answers
+    409 and changes nothing. A URL saved by hand under no key is adopted: it
+    takes the key, keeps its own fields and answers 200 with `adopted: true`. A
+    URL held under another key answers 409. Deleting an article frees its key,
+    so a create under that key afterwards saves the article again.
+    """
     try:
-        return await summarize_and_create_article(body.url, body.notes, session, settings)
-    except ArticleAlreadyExists as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        saved, outcome = save_article(article, session)
+    except ArticleHeld as e:
+        raise held_conflict(e) from e
+    if outcome is not SaveOutcome.CREATED:
+        response.status_code = status.HTTP_200_OK
+    return schemas.ArticleSaved.model_validate(saved).model_copy(update={'adopted': outcome is SaveOutcome.ADOPTED})
+
+
+@router.post(
+    '/create-from-url',
+    response_model=schemas.Article,
+    status_code=status.HTTP_201_CREATED,
+    responses={status.HTTP_409_CONFLICT: HELD_RESPONSE},
+)
+def create_from_url(body: schemas.ArticleCreateFromUrl, session: DbSession):
+    """Save the page at a URL under its own title, with no summary."""
+    try:
+        return save_article_from_url(body.url, body.notes, session)
+    except ArticleHeld as e:
+        raise held_conflict(e) from e
     except PAGE_ERRORS as e:
         raise page_error(e) from e
 
@@ -173,18 +211,17 @@ def bulk_import_status(batch_id: str, request: Request):
 
 @router.get('/search', response_model=list[schemas.Article], status_code=status.HTTP_200_OK)
 def search(q: str, session: DbSession):
-    """Search for comma-separated list of tags.
+    """Articles whose title, tags, summary or notes hold any of the comma-separated terms, ignoring case.
 
-    Search terms must be separated and wildcards added.
-    `tags` column must be converted from array to string to perform the like comparison for each search term.
-    Use the OR to search for any of the specified search terms.
-    NOTE: Converting the tags array to text cannot use the GIN index that is set in postgres on the tags column.
-    This is a limitation of the array type in that it can't match partial results and use the index.
+    The title is searched because an article saved from its URL carries no tags.
+    The tags array is cast to text to match part of a tag, which cannot use its
+    GIN index.
     """
     logger.debug('article_search', query=q)
     search_terms = [f'%{term.strip()}%' for term in q.split(',')]
     logger.debug('article_search_terms', terms=search_terms)
-    conditions = [cast((models.Article.tags), postgresql.TEXT).ilike(term) for term in search_terms]
+    searched = (models.Article.title, cast(models.Article.tags, postgresql.TEXT), models.Article.summary, models.Article.notes)
+    conditions = [column.ilike(term) for term in search_terms for column in searched]
     articles = select(models.Article).filter(or_(*conditions)).order_by(models.Article.title.asc())
     results = session.scalars(articles).all()
     logger.debug('article_search_results', count=len(results))

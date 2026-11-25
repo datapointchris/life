@@ -1,9 +1,10 @@
 import datetime as dt
-from typing import ClassVar
+from typing import Literal
 
 from pydantic import AwareDatetime
 from pydantic import BaseModel
 from pydantic import ConfigDict
+from pydantic import Field
 
 from life import models
 from life.schemas.one_line_text import OneLineText
@@ -18,7 +19,7 @@ class ArticleCreate(ArticleConfig):
     title: OneLineText
     url: str
     tags: list[str] = []
-    summary: str
+    summary: str | None = None
     notes: str | None = None
     save_date: AwareDatetime
     read_count: int = 0
@@ -26,6 +27,8 @@ class ArticleCreate(ArticleConfig):
     is_current: bool = False
     is_archived: bool = False
     review_days: int | None = None
+    # A client's own name for the article, which makes the create safe to repeat.
+    source_key: str | None = Field(default=None, min_length=1)
 
 
 class ArticleCreateFromUrl(ArticleConfig):
@@ -56,12 +59,30 @@ class Article(ArticleConfig):
     is_current: bool
     is_archived: bool
     review_days: int | None = None
+    source_key: str | None = None
+
+
+class ArticleSaved(Article):
+    """What a create answers: `adopted` is true only on the create that gave an article saved by hand its `source_key`.
+
+    That create applied nothing else from its body, so the article keeps its own title, notes and dates.
+    """
+
+    adopted: bool = False
+
+
+class ArticleConflict(BaseModel):
+    """A create's 409: `conflict` names what collided, `source_key` when the key holds another body and `url` when the URL is held."""
+
+    error: str
+    message: str
+    conflict: Literal['source_key', 'url']
+    article_id: int
+    source_key: str | None
 
 
 class ArticleUpdate(ArticleConfig, PartialUpdate):
     updates = models.Article
-    # The column takes a null so this release reads one, and no client writes one until the release after it.
-    refuses_null: ClassVar[frozenset[str]] = frozenset({'summary'})
 
     title: OneLineText | None = None
     tags: list[str] = []
