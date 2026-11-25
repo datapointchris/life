@@ -419,6 +419,63 @@ def test_create_article_without_save_date_returns_422(txn_api_logged_in):
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, show_status_and_response(response)
 
 
+class TestCreateUnderASourceKey:
+    BODY = {'title': 'A saved post', 'url': 'https://example.com/saved-post', 'save_date': '2026-11-20T15:04:05Z', 'source_key': 'post/abc'}
+
+    def test_a_repeat_of_the_body_answers_the_article_it_saved(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        first = client.post(ENDPOINT, json=self.BODY)
+        assert first.status_code == status.HTTP_201_CREATED, show_status_and_response(first)
+        again = client.post(ENDPOINT, json=self.BODY | {'save_date': '2026-11-20T10:04:05-05:00'})
+        assert again.status_code == status.HTTP_200_OK, show_status_and_response(again)
+        assert again.json()['id'] == first.json()['id']
+        assert again.json()['adopted'] is False
+
+    def test_another_body_under_the_key_answers_409_naming_the_article_and_changes_nothing(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        first = client.post(ENDPOINT, json=self.BODY).json()
+        refused = client.post(ENDPOINT, json=self.BODY | {'title': 'Retitled'})
+        assert refused.status_code == status.HTTP_409_CONFLICT, show_status_and_response(refused)
+        assert refused.json() | {'message': ''} == {
+            'error': 'Conflict',
+            'message': '',
+            'conflict': 'source_key',
+            'article_id': first['id'],
+            'source_key': 'post/abc',
+        }
+        assert client.get(f'{ENDPOINT}/{first["id"]}').json()['title'] == 'A saved post'
+
+    def test_a_url_saved_by_hand_is_adopted_and_a_repeat_still_answers_it(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        by_hand = {'title': 'My own title', 'url': self.BODY['url'], 'notes': 'kept', 'save_date': '2026-11-01T00:00:00Z'}
+        saved = client.post(ENDPOINT, json=by_hand).json()
+
+        adopted = client.post(ENDPOINT, json=self.BODY)
+        assert adopted.status_code == status.HTTP_200_OK, show_status_and_response(adopted)
+        assert adopted.json() | {'title': 'My own title', 'notes': 'kept', 'source_key': 'post/abc', 'adopted': True} == adopted.json()
+        assert adopted.json()['id'] == saved['id']
+
+        again = client.post(ENDPOINT, json=self.BODY)
+        assert again.status_code == status.HTTP_200_OK, show_status_and_response(again)
+        assert again.json()['id'] == saved['id']
+
+    def test_a_url_held_under_another_key_answers_409(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        held = client.post(ENDPOINT, json=self.BODY).json()
+        refused = client.post(ENDPOINT, json=self.BODY | {'source_key': 'post/other'})
+        assert refused.status_code == status.HTTP_409_CONFLICT, show_status_and_response(refused)
+        body = refused.json()
+        assert (body['conflict'], body['article_id'], body['source_key']) == ('url', held['id'], 'post/abc')
+
+    def test_a_plain_create_of_a_held_url_answers_409(self, txn_api_logged_in):
+        client, _ = txn_api_logged_in
+        held = client.post(ENDPOINT, json=NEW_OBJ.model_dump(mode='json')).json()
+        refused = client.post(ENDPOINT, json=NEW_OBJ.model_dump(mode='json') | {'title': 'Another'})
+        assert refused.status_code == status.HTTP_409_CONFLICT, show_status_and_response(refused)
+        body = refused.json()
+        assert (body['conflict'], body['article_id'], body['source_key']) == ('url', held['id'], None)
+
+
 def test_a_title_is_stored_on_one_line(txn_api_logged_in):
     """A title pasted with a page's newlines and indentation otherwise prints across
     several lines and sorts ahead of every letter."""

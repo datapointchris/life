@@ -27,6 +27,10 @@ class Article(Base):
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False)
     review_days: Mapped[int] = mapped_column(Integer, nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
+    # A client's own name for the article. Opaque here: life only stores it and matches on it.
+    source_key: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
+    # SHA-256 of the body that saved or adopted the article under `source_key`, which a repeat must match.
+    source_body_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self):
         return f"""Article(
@@ -40,5 +44,6 @@ class Article(Base):
             is_favorite={self.is_favorite!r},
             is_current={self.is_current!r},
             review_days={self.review_days!r},
-            notes={self.notes!r}
+            notes={self.notes!r},
+            source_key={self.source_key!r}
             )"""

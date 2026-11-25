@@ -3,8 +3,10 @@ from life.schemas.admin_settings import AdminSettings
 from life.schemas.admin_settings import AdminSettingsUpdate
 from life.schemas.article import Article
 from life.schemas.article import ArticleBulkImport
+from life.schemas.article import ArticleConflict
 from life.schemas.article import ArticleCreate
 from life.schemas.article import ArticleCreateFromUrl
+from life.schemas.article import ArticleSaved
 from life.schemas.article import ArticleSummary
 from life.schemas.article import ArticleSummaryAndTags
 from life.schemas.article import ArticleUpdate
@@ -124,8 +126,10 @@ __all__ = [
     'AdminSettingsUpdate',
     'Article',
     'ArticleBulkImport',
+    'ArticleConflict',
     'ArticleCreate',
     'ArticleCreateFromUrl',
+    'ArticleSaved',
     'ArticleSummary',
     'ArticleSummaryAndTags',
     'ArticleUpdate',
