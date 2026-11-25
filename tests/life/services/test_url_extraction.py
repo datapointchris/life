@@ -3,9 +3,19 @@ from unittest.mock import patch
 
 import pytest
 
+from life.services.outbound_http import FetchedPage
 from life.services.url_extraction import YouTubeMetadata
 from life.services.url_extraction import extract_video_id
 from life.services.url_extraction import get_youtube_video_metadata
+from life.services.url_extraction import read_article_title
+
+
+def test_a_page_too_short_to_summarize_still_gives_the_title_it_is_saved_under():
+    """A save keeps only the title, so it is not refused for text it would throw away."""
+    url = 'https://example.com/short-note'
+    html = b'<html><head><title>A short note | Example</title></head><body><p>Too few words to summarize.</p></body></html>'
+    with patch('life.services.url_extraction.get_page', return_value=FetchedPage(url, url, 200, html)):
+        assert read_article_title(url) == 'A short note'
 
 
 @pytest.mark.parametrize(
