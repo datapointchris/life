@@ -118,7 +118,7 @@ All production commands are **blue/green aware** — they automatically detect t
 | `prod build-test` | Test production Docker build locally | `lifeops prod build-test` |
 | `prod apihealth` | Check API health endpoint (JSON) | `lifeops prod apihealth` |
 | `prod docker [service]` | Show merged Docker Compose config | `lifeops prod docker api` |
-| `prod db ...` | Database commands (backup, restore, list, init) | `lifeops prod db backup pre-deploy` |
+| `prod db init` | Run migrations and insert users, as the database's owner; `seed` and `reset` refuse production | `lifeops prod db init` |
 
 ### SSL Certificate Management
 
