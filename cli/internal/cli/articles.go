@@ -563,8 +563,8 @@ func printArticleDetail(out io.Writer, a api.Article) {
 	if a.ReviewDays != nil {
 		_, _ = fmt.Fprintf(out, "  review:    every %d days\n", *a.ReviewDays)
 	}
-	if a.Summary != "" {
-		_, _ = fmt.Fprintf(out, "  summary:   %s\n", a.Summary)
+	if s := strValue(a.Summary); s != "" {
+		_, _ = fmt.Fprintf(out, "  summary:   %s\n", s)
 	}
 	if s := strValue(a.Notes); s != "" {
 		_, _ = fmt.Fprintf(out, "  notes:     %s\n", s)

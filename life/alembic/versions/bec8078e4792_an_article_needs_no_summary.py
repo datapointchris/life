@@ -4,8 +4,7 @@ Revision ID: bec8078e4792
 Revises: 2cf648a5eded
 Create Date: 2026-11-24 20:26:08.307667
 
-An article may carry no summary, such as one saved from its URL under the
-page's title alone.
+An article's summary is optional.
 """
 
 import sqlalchemy as sa

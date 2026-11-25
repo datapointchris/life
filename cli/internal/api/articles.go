@@ -18,7 +18,7 @@ type Article struct {
 	Title        string     `json:"title"`
 	URL          string     `json:"url"`
 	Tags         []string   `json:"tags"`
-	Summary      string     `json:"summary"`
+	Summary      *string    `json:"summary"`
 	Notes        *string    `json:"notes"`
 	SaveDate     time.Time  `json:"save_date"`
 	LastReadDate *time.Time `json:"last_read_date"`
