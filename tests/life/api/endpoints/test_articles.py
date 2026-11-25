@@ -399,14 +399,18 @@ def test_read_many_returns_empty_list_when_no_articles(txn_api_logged_in):
 # ---------------------------------------------------------------------------
 
 
-def test_an_article_saved_without_a_summary_reads_back_with_none(txn_api_logged_in):
+def test_an_article_saved_without_a_summary_or_cleared_of_one_reads_back_with_none(txn_api_logged_in):
     client, _ = txn_api_logged_in
     payload = {'title': 'No Summary', 'url': 'http://nosummary.com', 'save_date': str(dt.datetime.now(dt.UTC))}
-    created = client.post(ENDPOINT, json=payload)
-    assert created.status_code == status.HTTP_201_CREATED, show_status_and_response(created)
-    response = client.get(f'{ENDPOINT}/{created.json()["id"]}')
-    assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
-    assert response.json()['summary'] is None
+    unwritten = client.post(ENDPOINT, json=payload)
+    assert unwritten.status_code == status.HTTP_201_CREATED, show_status_and_response(unwritten)
+    written = client.post(ENDPOINT, json=payload | {'url': 'http://summarized.com', 'summary': 'Written'}).json()
+    cleared = client.patch(f'{ENDPOINT}/{written["id"]}', json={'summary': None})
+    assert cleared.status_code == status.HTTP_200_OK, show_status_and_response(cleared)
+    for article_id in (unwritten.json()['id'], written['id']):
+        response = client.get(f'{ENDPOINT}/{article_id}')
+        assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
+        assert response.json()['summary'] is None
 
 
 def test_create_article_without_save_date_returns_422(txn_api_logged_in):
