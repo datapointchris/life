@@ -151,7 +151,7 @@ func (c *Client) GetCurrentArticle(ctx context.Context) (*Article, error) {
 	return article, nil
 }
 
-// SearchArticles returns articles whose tags match q (GET /articles/search?q=).
+// SearchArticles returns articles whose title, tags, summary or notes match q (GET /articles/search?q=).
 // Comma-separated terms are matched independently (OR).
 func (c *Client) SearchArticles(ctx context.Context, q string) ([]Article, error) {
 	path := "/articles/search?" + url.Values{"q": {q}}.Encode()

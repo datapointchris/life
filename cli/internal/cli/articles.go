@@ -24,11 +24,9 @@ func newArticlesCommand() *cobra.Command {
 			"  life articles show 42        one article in full\n" +
 			"  life articles current        the article being read now",
 	})
-	// Search matches tags only, so it cannot stand alone as the way to find an
-	// article whose tags you do not know.
 	goclikit.WithRecoveryHints(cmd,
 		"List every article: life articles list",
-		"Search articles by tag: life articles search <tag>",
+		"Search articles by title, tag, summary or notes: life articles search <terms>",
 	)
 	splitReadingFromChanging(cmd)
 	cmd.AddGroup(&cobra.Group{ID: groupArticleImports, Title: "Import commands:"})
@@ -209,9 +207,10 @@ func newArticlesListCommand() *cobra.Command {
 func newArticlesSearchCommand() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     "search <tag>",
-		Short:   "Search articles by tag",
-		Long:    "Comma-separated terms are matched independently (\"python,databases\" finds\narticles tagged with either).",
+		Use:   "search <terms>",
+		Short: "Search articles by title, tag, summary or notes",
+		Long: "Each comma-separated term matches part of an article's title, tags, summary\n" +
+			"or notes, ignoring case (\"python,databases\" finds articles that mention either).",
 		Example: "  life articles search databases\n  life articles search \"python,systems\"",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

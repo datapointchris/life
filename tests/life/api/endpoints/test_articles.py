@@ -112,11 +112,10 @@ def test_search(article_crud_tester):
     )
     response = client.post(ENDPOINT, json=searchable_article.model_dump(mode='json'))
     assert response.status_code == status.HTTP_201_CREATED, show_status_and_response(response)
-    response = client.get(f'{ENDPOINT}/search', params={'q': 'test-search'})
-    assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
-    articles = response.json()
-    assert len(articles) > 0
-    assert any(article['title'] == 'Searchable Article' for article in articles)
+    for term in ('test-search', 'searchable'):
+        response = client.get(f'{ENDPOINT}/search', params={'q': term})
+        assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
+        assert any(article['title'] == 'Searchable Article' for article in response.json()), term
 
 
 @patch('life.api.endpoints.articles.read_article_page')

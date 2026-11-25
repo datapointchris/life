@@ -13,7 +13,7 @@
             v-model="searchInput"
             type="text"
             class="textbox"
-            placeholder="Search articles by tags (comma-separated)..."
+            placeholder="Search titles, tags, summaries and notes (comma-separated)..."
           />
           <button
             type="submit"

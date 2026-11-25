@@ -211,18 +211,17 @@ def bulk_import_status(batch_id: str, request: Request):
 
 @router.get('/search', response_model=list[schemas.Article], status_code=status.HTTP_200_OK)
 def search(q: str, session: DbSession):
-    """Search for comma-separated list of tags.
+    """Articles whose title, tags, summary or notes hold any of the comma-separated terms, ignoring case.
 
-    Search terms must be separated and wildcards added.
-    `tags` column must be converted from array to string to perform the like comparison for each search term.
-    Use the OR to search for any of the specified search terms.
-    NOTE: Converting the tags array to text cannot use the GIN index that is set in postgres on the tags column.
-    This is a limitation of the array type in that it can't match partial results and use the index.
+    The title is searched because an article saved from its URL carries no tags.
+    The tags array is cast to text to match part of a tag, which cannot use its
+    GIN index.
     """
     logger.debug('article_search', query=q)
     search_terms = [f'%{term.strip()}%' for term in q.split(',')]
     logger.debug('article_search_terms', terms=search_terms)
-    conditions = [cast((models.Article.tags), postgresql.TEXT).ilike(term) for term in search_terms]
+    searched = (models.Article.title, cast(models.Article.tags, postgresql.TEXT), models.Article.summary, models.Article.notes)
+    conditions = [column.ilike(term) for term in search_terms for column in searched]
     articles = select(models.Article).filter(or_(*conditions)).order_by(models.Article.title.asc())
     results = session.scalars(articles).all()
     logger.debug('article_search_results', count=len(results))
