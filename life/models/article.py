@@ -29,8 +29,9 @@ class Article(Base):
     notes: Mapped[str] = mapped_column(Text, nullable=True)
     # A client's own name for the article. Opaque here: life only stores it and matches on it.
     source_key: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
-    # SHA-256 of the body that saved or adopted the article under `source_key`, which a repeat must match.
-    source_body_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The versioned fingerprint of the body that saved or adopted the article under `source_key`, which a
+    # repeat must match. `body_fingerprint` in `services/article_creation.py` takes it.
+    source_body_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self):
         return f"""Article(

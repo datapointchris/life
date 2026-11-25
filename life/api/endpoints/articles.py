@@ -1,8 +1,4 @@
-import datetime as dt
-import hashlib
 import html as html_escaping
-import json
-from typing import Any
 
 import markdown
 import structlog
@@ -13,14 +9,11 @@ from fastapi import Request
 from fastapi import Response
 from fastapi import status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.encoders import jsonable_encoder
 from sqlalchemy import cast
 from sqlalchemy import func
 from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 from life import models
 from life import schemas
@@ -34,7 +27,9 @@ from life.api.exceptions import NotFoundException
 from life.api.time_window import TimeWindowQuery
 from life.config import Settings
 from life.config import get_settings
-from life.services.article_creation import ArticleAlreadyExists
+from life.services.article_creation import ArticleHeld
+from life.services.article_creation import SaveOutcome
+from life.services.article_creation import save_article
 from life.services.article_creation import save_article_from_url
 from life.services.outbound_http import PageFetchError
 from life.services.outbound_http import PageStatusError
@@ -134,46 +129,14 @@ def read_one_url(url: str, session: DbSession):
     raise NotFoundException('article', f'url={url}', logger)
 
 
-def body_sha256(values: dict[str, Any]) -> str:
-    """The create body's fingerprint, taken after validation so defaults are filled and the save date reads in UTC."""
-    canonical = jsonable_encoder(values | {'save_date': values['save_date'].astimezone(dt.UTC)})
-    return hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-
-
-def held_conflict(held: models.Article, conflict: str, message: str) -> HTTPException:
-    detail = {'message': message, 'conflict': conflict, 'article_id': held.id, 'source_key': held.source_key}
+def held_conflict(e: ArticleHeld) -> HTTPException:
+    """The 409 `schemas.ArticleConflict` declares, naming the article the save met."""
+    detail = {'message': str(e), 'conflict': e.conflict, 'article_id': e.held.id, 'source_key': e.held.source_key}
     logger.info('article_create_conflict', **detail)
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
 
-def answered(article: models.Article, response: Response, *, adopted: bool = False) -> schemas.ArticleSaved:
-    response.status_code = status.HTTP_200_OK
-    return schemas.ArticleSaved.model_validate(article).model_copy(update={'adopted': adopted})
-
-
-def save_or_answer_held(session: Session, values: dict[str, Any], response: Response) -> schemas.ArticleSaved:
-    key = values['source_key']
-    fingerprint = body_sha256(values) if key is not None else None
-    if key is not None and (held := session.scalar(select(models.Article).where(models.Article.source_key == key))):
-        if held.source_body_sha256 != fingerprint:
-            raise held_conflict(
-                held, 'source_key', f'article {held.id} holds source_key {key!r} from a different body, and was left as it is'
-            )
-        return answered(held, response)
-    if held := session.scalar(select(models.Article).where(models.Article.url == values['url'])):
-        if key is None or held.source_key is not None:
-            under = f' under source_key {held.source_key!r}' if held.source_key is not None else ''
-            raise held_conflict(held, 'url', f'article {held.id} already holds {held.url}{under}')
-        held.source_key = key
-        held.source_body_sha256 = fingerprint
-        session.commit()
-        logger.info('article_adopted', article_id=held.id, source_key=key)
-        return answered(held, response, adopted=True)
-    article = models.Article(**values, source_body_sha256=fingerprint)
-    session.add(article)
-    session.commit()
-    session.refresh(article)
-    return schemas.ArticleSaved.model_validate(article)
+HELD_RESPONSE = {'model': schemas.ArticleConflict, 'description': 'The URL is held, or the source_key holds another body'}
 
 
 @router.post(
@@ -181,11 +144,14 @@ def save_or_answer_held(session: Session, values: dict[str, Any], response: Resp
     response_model=schemas.ArticleSaved,
     status_code=status.HTTP_201_CREATED,
     responses={
-        status.HTTP_200_OK: {'model': schemas.ArticleSaved, 'description': 'The article this source_key or URL already names'},
-        status.HTTP_409_CONFLICT: {
-            'model': schemas.ArticleConflict,
-            'description': 'The source_key holds another body, or the URL is held',
+        status.HTTP_200_OK: {
+            'model': schemas.ArticleSaved,
+            'description': (
+                'The article this source_key or URL already names. With `adopted: true` the article was saved by hand under no '
+                'key: it took the key and kept its own fields, so nothing else in the body was applied.'
+            ),
         },
+        status.HTTP_409_CONFLICT: HELD_RESPONSE,
     },
 )
 def create(article: schemas.ArticleCreate, session: DbSession, response: Response):
@@ -194,25 +160,31 @@ def create(article: schemas.ArticleCreate, session: DbSession, response: Respons
     Without a `source_key` a held URL answers 409. With one, a repeat of the
     body that saved it answers 200 and that article, and any other body answers
     409 and changes nothing. A URL saved by hand under no key is adopted: it
-    takes the key and answers 200 with `adopted: true`. A URL held under
-    another key answers 409.
+    takes the key, keeps its own fields and answers 200 with `adopted: true`. A
+    URL held under another key answers 409. Deleting an article frees its key,
+    so a create under that key afterwards saves the article again.
     """
-    values = article.model_dump() | {'url': clean_url(article.url)}
     try:
-        return save_or_answer_held(session, values, response)
-    except IntegrityError:
-        # Another create took the key or the URL between the reads and the commit, so the reads now find it.
-        session.rollback()
-        return save_or_answer_held(session, values, response)
+        saved, outcome = save_article(article, session)
+    except ArticleHeld as e:
+        raise held_conflict(e) from e
+    if outcome is not SaveOutcome.CREATED:
+        response.status_code = status.HTTP_200_OK
+    return schemas.ArticleSaved.model_validate(saved).model_copy(update={'adopted': outcome is SaveOutcome.ADOPTED})
 
 
-@router.post('/create-from-url', response_model=schemas.Article, status_code=status.HTTP_201_CREATED)
+@router.post(
+    '/create-from-url',
+    response_model=schemas.Article,
+    status_code=status.HTTP_201_CREATED,
+    responses={status.HTTP_409_CONFLICT: HELD_RESPONSE},
+)
 def create_from_url(body: schemas.ArticleCreateFromUrl, session: DbSession):
     """Save the page at a URL under its own title, with no summary."""
     try:
         return save_article_from_url(body.url, body.notes, session)
-    except ArticleAlreadyExists as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    except ArticleHeld as e:
+        raise held_conflict(e) from e
     except PAGE_ERRORS as e:
         raise page_error(e) from e
 

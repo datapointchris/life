@@ -21,7 +21,6 @@ from life.config import get_settings
 from life.services.outbound_http import PageFetchError
 from life.services.outbound_http import PageStatusError
 from life.services.url_extraction import ArticlePage
-from life.services.url_extraction import CaptionsBlocked
 from tests.util import show_status_and_response
 from tests.utils.database import insert_test_data_transactional
 from tests.utils.database import test_settings
@@ -520,7 +519,7 @@ class TestCreateFromUrl:
     """Tests for POST /articles/create-from-url endpoint."""
 
     def page_read(self, **kwargs):
-        return patch(f'{CREATION_MODULE}.read_article_page', **({'return_value': PAGE} | kwargs))
+        return patch(f'{CREATION_MODULE}.read_article_title', **({'return_value': PAGE.title} | kwargs))
 
     def test_create_from_url_saves_the_page_title_and_no_summary(self, txn_api_logged_in):
         client, _ = txn_api_logged_in
@@ -533,14 +532,15 @@ class TestCreateFromUrl:
         assert data['tags'] == []
         assert data['save_date'] is not None
 
-    def test_create_from_url_duplicate_returns_409(self, txn_api_logged_in):
-        """Duplicate URL returns 409 Conflict."""
+    def test_a_held_url_answers_the_create_routes_409_naming_the_article(self, txn_api_logged_in):
         client, _ = txn_api_logged_in
         with self.page_read():
-            response1 = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dup'})
-            assert response1.status_code == status.HTTP_201_CREATED
-            response2 = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dup'})
-            assert response2.status_code == status.HTTP_409_CONFLICT
+            held = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dup'})
+            assert held.status_code == status.HTTP_201_CREATED, show_status_and_response(held)
+            refused = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dup'})
+        assert refused.status_code == status.HTTP_409_CONFLICT, show_status_and_response(refused)
+        body = refused.json()
+        assert (body['conflict'], body['article_id'], body['source_key']) == ('url', held.json()['id'], None)
 
     def test_create_from_url_with_notes(self, txn_api_logged_in):
         client, _ = txn_api_logged_in
@@ -557,9 +557,8 @@ class TestCreateFromUrl:
         [
             PageFetchError('https://example.com/dead', 'connection refused'),
             PageStatusError('https://example.com/dead', 403),
-            CaptionsBlocked('https://www.youtube.com/watch?v=abc'),
         ],
-        ids=['unreachable', 'refused', 'captions-blocked'],
+        ids=['unreachable', 'refused'],
     )
     def test_create_from_url_reports_a_failing_site_as_a_failed_dependency(self, txn_api_logged_in, failure):
         """The detail names what failed, which is what a caller needs to decide whether to retry."""

@@ -120,6 +120,13 @@ them and renders every lane alone.
 with the article it saved, and another body answers 409 and changes nothing.
 The audit trail records each write under the client's id.
 
+A body whose URL a person already saved, under no key, adopts that article. It
+answers 200 with `adopted: true`, and the article takes the key and keeps every
+other field of its own, so nothing else in the body is applied. A repeat of that
+body answers 200 from then on. Deleting an article frees its key, so a client
+that sends the body again saves the article again. A client delivering each item
+once never meets that.
+
 `permits` matches a template exactly. `tests/life/api/test_client_scopes.py`
 requests every listed route as a scoped client and requires its success status,
 so a renamed path parameter fails it with 403.

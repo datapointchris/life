@@ -63,7 +63,10 @@ class Article(ArticleConfig):
 
 
 class ArticleSaved(Article):
-    """What a create answers: `adopted` is true only on the create that gave an article saved by hand its `source_key`."""
+    """What a create answers: `adopted` is true only on the create that gave an article saved by hand its `source_key`.
+
+    That create applied nothing else from its body, so the article keeps its own title, notes and dates.
+    """
 
     adopted: bool = False
 

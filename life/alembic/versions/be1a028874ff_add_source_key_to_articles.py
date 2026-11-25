@@ -6,8 +6,9 @@ Create Date: 2026-11-24 20:46:33.193113
 
 A client that saves articles on its own schedule names each by a key of its
 own, so a repeated save finds the article rather than adding a second.
-`source_body_sha256` fingerprints the body that saved or adopted it, which is
-what a repeat is compared against. Every existing article keeps both null.
+`source_body_fingerprint` holds the versioned fingerprint of the body that
+saved or adopted it, which a repeat is compared against. Every existing article
+keeps both null.
 """
 
 import sqlalchemy as sa
@@ -22,11 +23,11 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column('articles', sa.Column('source_key', sa.Text(), nullable=True))
-    op.add_column('articles', sa.Column('source_body_sha256', sa.Text(), nullable=True))
+    op.add_column('articles', sa.Column('source_body_fingerprint', sa.Text(), nullable=True))
     op.create_unique_constraint(op.f('uq_articles_source_key'), 'articles', ['source_key'])
 
 
 def downgrade() -> None:
     op.drop_constraint(op.f('uq_articles_source_key'), 'articles', type_='unique')
-    op.drop_column('articles', 'source_body_sha256')
+    op.drop_column('articles', 'source_body_fingerprint')
     op.drop_column('articles', 'source_key')

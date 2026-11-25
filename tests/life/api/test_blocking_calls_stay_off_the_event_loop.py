@@ -105,7 +105,7 @@ HOLD_SECONDS = 5
 
 HELD_CALLS = [
     pytest.param(
-        'life.services.article_creation.read_article_page',
+        'life.services.article_creation.read_article_title',
         'POST',
         '/articles/create-from-url',
         {'json': {'url': 'https://held.example/article'}},
