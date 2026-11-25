@@ -114,6 +114,12 @@ in `SCOPE_ROUTES` names the command. `life overview` has no route of its own. It
 fans out to every list a lane draws from, so `life.overview.read` lists each of
 them and renders every lane alone.
 
+**A write scope lists the one create a service saves through.**
+`life.articles.write` reaches `POST /api/v1/articles`. A body naming a
+`source_key` makes that create safe to repeat: the same body again answers 200
+with the article it saved, and another body answers 409 and changes nothing.
+The audit trail records each write under the client's id.
+
 `permits` matches a template exactly. `tests/life/api/test_client_scopes.py`
 requests every listed route as a scoped client and requires its success status,
 so a renamed path parameter fails it with 403.

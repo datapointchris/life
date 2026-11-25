@@ -42,6 +42,13 @@ SCOPED_URLS = {
     f'{API_PREFIX}/habits/day': '/habits/day',
     f'{API_PREFIX}/tasks': f'/tasks?status=completed&{SINCE}',
 }
+# The URL and body of each write any scope lists.
+SCOPED_WRITES = {
+    ('POST', f'{API_PREFIX}/articles'): (
+        '/articles',
+        {'title': 'Saved by a service', 'url': 'https://example.com/scoped', 'save_date': '2026-01-01T00:00:00Z', 'source_key': 'scoped/1'},
+    ),
+}
 
 
 def scoped_routes() -> Iterator[tuple[str, str, str]]:
@@ -71,8 +78,9 @@ def as_caller(txn_api):
 
 @pytest.mark.parametrize(('scope', 'method', 'template'), SCOPED_ROUTES)
 def test_a_scoped_client_reaches_every_route_its_scope_lists(as_caller, scope, method, template):
-    response = as_caller.caller(scoped(scope)).request(method, SCOPED_URLS[template])
-    assert response.status_code == status.HTTP_200_OK, show_status_and_response(response)
+    url, body = SCOPED_WRITES[(method, template)] if (method, template) in SCOPED_WRITES else (SCOPED_URLS[template], None)
+    response = as_caller.caller(scoped(scope)).request(method, url, json=body)
+    assert response.is_success, show_status_and_response(response)
 
 
 @pytest.mark.parametrize(
@@ -86,6 +94,7 @@ def test_a_scoped_client_reaches_every_route_its_scope_lists(as_caller, scope, m
         (HABITS, 'GET', '/habits/day'),
         (TASKS, 'GET', '/tasks/completed'),
         (ARTICLES, 'GET', '/articles/current'),
+        (ARTICLES, 'POST', '/articles'),
         (BOOKS, 'GET', '/articles'),
     ],
     ids=[
@@ -97,6 +106,7 @@ def test_a_scoped_client_reaches_every_route_its_scope_lists(as_caller, scope, m
         'habits-a-read-only-overview-lists',
         'tasks-unlisted-read-on-a-scoped-router',
         'articles-a-read-only-overview-lists',
+        'articles-read-cannot-write',
         'books-another-scopes-route',
     ],
 )

@@ -36,6 +36,8 @@ SCOPE_ROUTES: dict[str, frozenset[tuple[str, str]]] = {
     'life.habits.read': frozenset({('GET', f'{API_PREFIX}/habits/completed')}),
     'life.tasks.read': TASKS_READ,
     'life.articles.read': ARTICLES_READ,
+    # The create a service saving into the reading list calls, naming each article by its `source_key`.
+    'life.articles.write': frozenset({('POST', f'{API_PREFIX}/articles')}),
     'life.books.read': BOOKS_READ,
 }
 
