@@ -46,7 +46,7 @@ class Article(ArticleConfig):
     title: str
     url: str
     tags: list[str]
-    summary: str
+    summary: str | None = None
     notes: str | None = None
     save_date: dt.datetime
     last_read_date: dt.datetime | None = None

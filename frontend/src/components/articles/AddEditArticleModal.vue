@@ -126,7 +126,7 @@ const props = defineProps<{
     title: string
     url: string
     tags: string[]
-    summary: string
+    summary: string | null
     notes?: string
   } | null
 }>()
@@ -155,7 +155,7 @@ watch(
       form.url = props.editData.url
       form.title = props.editData.title
       form.tags = props.editData.tags.join(', ')
-      form.summary = props.editData.summary
+      form.summary = props.editData.summary ?? ''
       form.notes = props.editData.notes ?? ''
     }
   }

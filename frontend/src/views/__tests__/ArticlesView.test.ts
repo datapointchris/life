@@ -24,7 +24,7 @@ const testArticles: Article[] = [
     title: 'Understanding OKLCH Colors',
     url: 'https://example.com/oklch',
     tags: ['css', 'color'],
-    summary: 'A deep dive into OKLCH color space',
+    summary: null,
     save_date: '2026-03-01T00:00:00Z',
     read_count: 2,
     is_favorite: true,

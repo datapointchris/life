@@ -375,7 +375,7 @@ export interface Article {
   title: string
   url: string
   tags: string[]
-  summary: string
+  summary: string | null
   notes?: string
   save_date: string
   last_read_date?: string

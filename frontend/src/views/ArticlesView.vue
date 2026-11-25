@@ -275,7 +275,7 @@ const editTarget = ref<{
   title: string
   url: string
   tags: string[]
-  summary: string
+  summary: string | null
   notes?: string
 } | null>(null)
 
