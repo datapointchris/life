@@ -523,7 +523,7 @@ def generate_snapshot(events_path: str | None = None, output_dir: str | None = N
 
     Args:
         events_path: Path to events.jsonl (uses config default if None)
-        output_dir: Directory to write snapshot (uses stats/ if None)
+        output_dir: Directory to write snapshot (uses the config's data_dir if None)
 
     Returns:
         Path to the generated snapshot, or None if no commit events found
@@ -533,7 +533,7 @@ def generate_snapshot(events_path: str | None = None, output_dir: str | None = N
     if events_path is None:
         events_path = config.get('events_path', 'stats/data/events/events.jsonl')
     if output_dir is None:
-        output_dir = 'stats/data'
+        output_dir = config['data_dir']
 
     events = read_events_backwards(events_path)
     if not events:

@@ -17,13 +17,11 @@ from stats.schemas.commit import CommitEvent
 from stats.schemas.commit import StagedFile
 from stats.snapshot import generate_snapshot
 
-TIMING_DIR = Path(__file__).parent / 'data' / 'timing'
 
-
-def write_timing(collector_name: str, duration: float, total_duration: float | None = None) -> None:
+def write_timing(timing_dir: Path, collector_name: str, duration: float, total_duration: float | None = None) -> None:
     """Append timing entry to collect timing log."""
-    TIMING_DIR.mkdir(parents=True, exist_ok=True)
-    log_file = TIMING_DIR / 'collect.log'
+    timing_dir.mkdir(parents=True, exist_ok=True)
+    log_file = timing_dir / 'collect.log'
     timestamp = dt.datetime.now(dt.UTC).strftime('%Y-%m-%d %H:%M:%S')
 
     with log_file.open('a') as f:
@@ -138,6 +136,7 @@ def main() -> int:
     config = load_config()
     project = config['project']
     events_path = config['events_path']
+    data_dir = Path(config['data_dir'])
     branch = get_branch()
     commit_info = get_commit_info()
 
@@ -175,7 +174,7 @@ def main() -> int:
                 start = time.perf_counter()
                 event = collector_runner(branch, project)
                 duration = time.perf_counter() - start
-                write_timing(collector_name, duration)
+                write_timing(data_dir / 'timing', collector_name, duration)
 
                 if event is not None:
                     emit_event(event, events_path)
@@ -183,9 +182,9 @@ def main() -> int:
                 print(f"Warning: Collector '{collector_name}' failed: {e}")
 
     total_duration = time.perf_counter() - total_start
-    write_timing('', 0, total_duration)
+    write_timing(data_dir / 'timing', '', 0, total_duration)
 
-    generate_snapshot(events_path)
+    generate_snapshot(events_path, output_dir=str(data_dir))
 
     return 0
 

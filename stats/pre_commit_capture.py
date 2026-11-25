@@ -18,8 +18,6 @@ from stats.hooks import HookRunner
 from stats.hooks import discover_hooks
 from stats.hooks import get_hook
 
-TIMING_DIR = Path(__file__).parent / 'data' / 'timing'
-
 
 def get_staged_files() -> list[str]:
     """Get list of staged files."""
@@ -41,10 +39,10 @@ def get_branch() -> str:
     return result.stdout.strip() or 'HEAD'
 
 
-def write_timing(hook_name: str, duration: float, total_duration: float | None = None) -> None:
+def write_timing(timing_dir: Path, hook_name: str, duration: float, total_duration: float | None = None) -> None:
     """Append timing entry to capture timing log."""
-    TIMING_DIR.mkdir(parents=True, exist_ok=True)
-    log_file = TIMING_DIR / 'capture.log'
+    timing_dir.mkdir(parents=True, exist_ok=True)
+    log_file = timing_dir / 'capture.log'
     timestamp = dt.datetime.now(dt.UTC).strftime('%Y-%m-%d %H:%M:%S')
 
     with log_file.open('a') as f:
@@ -66,6 +64,8 @@ def main() -> int:
 
     if not staged_files:
         return 0
+
+    timing_dir = Path(config['data_dir']) / 'timing'
 
     enabled_hooks = config.get('capture', {}).get('hooks', [])
     available_hooks = discover_hooks()
@@ -102,7 +102,7 @@ def main() -> int:
     # Emit events and write timing after all hooks complete
     # Hooks may return a single event or a list of events
     for hook_name, duration, result in results:
-        write_timing(hook_name, duration)
+        write_timing(timing_dir, hook_name, duration)
         if isinstance(result, list):
             for event in result:
                 emit_event(event, events_path)
@@ -110,7 +110,7 @@ def main() -> int:
             emit_event(result, events_path)
 
     total_duration = time.perf_counter() - total_start
-    write_timing('', 0, total_duration)
+    write_timing(timing_dir, '', 0, total_duration)
 
     return 0
 

@@ -104,6 +104,7 @@ class TestMain:
             ):
                 mock_config.return_value = {
                     'project': 'life',
+                    'data_dir': tmpdir,
                     'events_path': str(events_path),
                     'capture': {'hooks': ['ruff_check']},
                 }
@@ -138,6 +139,7 @@ class TestMain:
             ):
                 mock_config.return_value = {
                     'project': 'life',
+                    'data_dir': tmpdir,
                     'events_path': str(events_path),
                     'capture': {'hooks': ['nonexistent_hook']},
                 }
@@ -165,6 +167,7 @@ class TestMain:
             ):
                 mock_config.return_value = {
                     'project': 'life',
+                    'data_dir': tmpdir,
                     'events_path': str(events_path),
                     'capture': {'hooks': ['ruff_check', 'mypy']},
                 }
@@ -212,6 +215,7 @@ class TestMain:
             ):
                 mock_config.return_value = {
                     'project': 'life',
+                    'data_dir': tmpdir,
                     'events_path': str(events_path),
                     'capture': {'hooks': ['ruff_check']},
                 }

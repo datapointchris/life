@@ -134,6 +134,7 @@ class TestMain:
             ):
                 mock_config.return_value = {
                     'project': 'life',
+                    'data_dir': tmpdir,
                     'events_path': str(events_path),
                     'collect': {'collectors': []},
                 }
@@ -172,6 +173,7 @@ class TestMain:
             ):
                 mock_config.return_value = {
                     'project': 'life',
+                    'data_dir': tmpdir,
                     'events_path': str(events_path),
                     'collect': {'collectors': ['tokei']},
                 }
@@ -222,6 +224,7 @@ class TestMain:
             ):
                 mock_config.return_value = {
                     'project': 'life',
+                    'data_dir': tmpdir,
                     'events_path': str(events_path),
                     'collect': {'collectors': ['nonexistent_collector']},
                 }
@@ -260,6 +263,7 @@ class TestMain:
             ):
                 mock_config.return_value = {
                     'project': 'life',
+                    'data_dir': tmpdir,
                     'events_path': str(events_path),
                     'collect': {'collectors': ['pytest_collector']},
                 }

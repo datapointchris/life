@@ -9,6 +9,7 @@ from typing import Any
 # Default configuration if [tool.devstats] is not present
 DEFAULT_CONFIG: dict[str, Any] = {
     'project': 'life',
+    'data_dir': 'stats/data',
     'events_path': 'stats/data/events/events.jsonl',
     'capture': {
         'hooks': ['ruff_check', 'mypy', 'bandit', 'shellcheck', 'codespell', 'detect_private_key', 'sass'],
