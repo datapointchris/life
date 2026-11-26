@@ -580,4 +580,7 @@ func printArticleDetail(out io.Writer, a api.Article) {
 	if s := strValue(a.Notes); s != "" {
 		_, _ = fmt.Fprintf(out, "  notes:     %s\n", s)
 	}
+	if s := strValue(a.SourceKey); s != "" {
+		_, _ = fmt.Fprintf(out, "  source:    %s\n", s)
+	}
 }

@@ -27,6 +27,9 @@ type Article struct {
 	IsCurrent    bool       `json:"is_current"`
 	IsArchived   bool       `json:"is_archived"`
 	ReviewDays   *int       `json:"review_days"`
+	// SourceKey is the client's own name for an article it saved, and nil
+	// for one saved by hand.
+	SourceKey *string `json:"source_key"`
 }
 
 // ArticleCreateFromURLInput is the body for POST /articles/create-from-url. The
