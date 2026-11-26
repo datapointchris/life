@@ -39,7 +39,7 @@ type ArticleCreateFromURLInput struct {
 
 // ArticleUpdateInput is a partial update (PATCH /articles/{id}): only changed
 // fields are sent. Tags omitempty means an empty list is not sent (leaving tags
-// as-is). LastReadDate is a datetime string parsed server-side.
+// as-is). SaveDate and LastReadDate are RFC3339 instants parsed server-side.
 type ArticleUpdateInput struct {
 	Title        *string  `json:"title,omitempty"`
 	Tags         []string `json:"tags,omitempty"`
@@ -48,6 +48,7 @@ type ArticleUpdateInput struct {
 	IsFavorite   *bool    `json:"is_favorite,omitempty"`
 	IsCurrent    *bool    `json:"is_current,omitempty"`
 	IsArchived   *bool    `json:"is_archived,omitempty"`
+	SaveDate     *string  `json:"save_date,omitempty"`
 	LastReadDate *string  `json:"last_read_date,omitempty"`
 	ReadCount    *int     `json:"read_count,omitempty"`
 	ReviewDays   *int     `json:"review_days,omitempty"`

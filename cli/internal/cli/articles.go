@@ -335,6 +335,7 @@ func newArticlesEditCommand() *cobra.Command {
 		favorite   bool
 		current    bool
 		archived   bool
+		saved      string
 		lastRead   string
 		readCount  int
 		reviewDays int
@@ -344,7 +345,7 @@ func newArticlesEditCommand() *cobra.Command {
 		Use:     "edit <article-id> [flags]",
 		Short:   "Change fields on an existing article",
 		Long:    "Update only the fields whose flags you pass.",
-		Example: "  life articles edit 42 --favorite --review-days 30\n  life articles edit 42 --tag python --tag databases",
+		Example: "  life articles edit 42 --favorite --review-days 30\n  life articles edit 42 --tag python --tag databases\n  life articles edit 42 --saved 2019-03-04T17:20:00Z",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseIntArg("article id", args[0])
@@ -362,8 +363,15 @@ func newArticlesEditCommand() *cobra.Command {
 			in.IsFavorite = boolFlagPtr(cmd, "favorite")
 			in.IsCurrent = boolFlagPtr(cmd, "current")
 			in.IsArchived = boolFlagPtr(cmd, "archived")
+			if f.Changed("saved") {
+				instant, err := flagInstant("saved", saved, time.Local)
+				if err != nil {
+					return err
+				}
+				in.SaveDate = &instant
+			}
 			if f.Changed("last-read") {
-				instant, err := lastReadInstant(lastRead, time.Local)
+				instant, err := flagInstant("last-read", lastRead, time.Local)
 				if err != nil {
 					return err
 				}
@@ -398,6 +406,8 @@ func newArticlesEditCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&favorite, "favorite", false, "Mark as favorite (--favorite or --favorite=false)")
 	cmd.Flags().BoolVar(&current, "current", false, "Mark as the current article (--current or --current=false)")
 	cmd.Flags().BoolVar(&archived, "archived", false, "Mark as archived (--archived or --archived=false)")
+	cmd.Flags().StringVar(&saved, "saved", "",
+		"Day or time the article was saved, on this machine's clock (e.g. 2019-03-04 or 2019-03-04T17:20:00; an RFC3339 offset is kept)")
 	cmd.Flags().StringVar(&lastRead, "last-read", "",
 		"Last-read day or time on this machine's clock (e.g. 2026-07-24 or 2026-07-24T09:00:00; an RFC3339 offset is kept)")
 	cmd.Flags().IntVar(&readCount, "read-count", 0, "Read count")
@@ -406,12 +416,13 @@ func newArticlesEditCommand() *cobra.Command {
 	return cmd
 }
 
-var errLastReadFormat = errors.New("--last-read is not a day or a time")
+var errInstantFormat = errors.New("is not a day or a time")
 
-// lastReadInstant turns --last-read into the RFC3339 instant the API requires.
-// A bare day or a time with no offset is read on loc's clock. A bare day is
-// noon there, so its day stays the same in any zone within twelve hours.
-func lastReadInstant(value string, loc *time.Location) (string, error) {
+// flagInstant turns the value of the date flag named flag into the RFC3339
+// instant the API requires. A bare day or a time with no offset is read on
+// loc's clock. A bare day is noon there, so its day stays the same in any zone
+// within twelve hours.
+func flagInstant(flag, value string, loc *time.Location) (string, error) {
 	if t, err := time.Parse(time.RFC3339, value); err == nil {
 		return t.Format(time.RFC3339), nil
 	}
@@ -421,7 +432,7 @@ func lastReadInstant(value string, loc *time.Location) (string, error) {
 	if day, err := time.ParseInLocation(dayLayout, value, loc); err == nil {
 		return time.Date(day.Year(), day.Month(), day.Day(), 12, 0, 0, 0, loc).Format(time.RFC3339), nil
 	}
-	return "", goclikit.UsageError(fmt.Errorf("%w: %q — expected 2026-07-24, 2026-07-24T09:00:00 or RFC3339", errLastReadFormat, value))
+	return "", goclikit.UsageError(fmt.Errorf("--%s %w: %q — expected 2026-07-24, 2026-07-24T09:00:00 or RFC3339", flag, errInstantFormat, value))
 }
 
 func newArticlesReadCommand() *cobra.Command {
@@ -514,7 +525,7 @@ func newArticlesDeleteCommand() *cobra.Command {
 func isEmptyArticleUpdate(in api.ArticleUpdateInput) bool {
 	return in.Title == nil && in.Tags == nil && in.Summary == nil && in.Notes == nil &&
 		in.IsFavorite == nil && in.IsCurrent == nil && in.IsArchived == nil &&
-		in.LastReadDate == nil && in.ReadCount == nil && in.ReviewDays == nil
+		in.SaveDate == nil && in.LastReadDate == nil && in.ReadCount == nil && in.ReviewDays == nil
 }
 
 func runArticleList(cmd *cobra.Command, asJSON bool, fetch func(*api.Client) ([]api.Article, error)) error {

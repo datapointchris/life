@@ -91,6 +91,7 @@ class ArticleUpdate(ArticleConfig, PartialUpdate):
     is_favorite: bool | None = None
     is_current: bool | None = None
     is_archived: bool | None = None
+    save_date: AwareDatetime | None = None
     last_read_date: AwareDatetime | None = None
     read_count: int | None = None
     review_days: int | None = None
