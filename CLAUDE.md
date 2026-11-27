@@ -82,9 +82,18 @@ Turning a saved URL into a title and text is `read_article_page` in
 and recipe import. It refuses a redirect to the homepage, a bot check and a page
 with too little text, each as its own exception.
 
-One caller is deliberately outside it, because it is not a third-party page
-fetch: OIDC discovery in `api/oidc_auth.py`, which talks to the identity provider
-with its own user agent and a caller-supplied timeout. `api/smoke_tests.py` also
+A YouTube URL never reaches `get_page`. `services/ypl_client.py` reads the
+video's details and transcript from ypl, which paces every read of YouTube.
+`read_article_page`, `read_article_title` and the recipe import each route a
+YouTube URL there. A transcript that ypl refuses, such as a 503 while its door
+is busy, leaves the video read without one, and the log names the `Retry-After`.
+`YPL_API_URL` and `YPL_CLIENT_SECRET` configure it, and production's sit in
+`secrets/secrets.prod.enc.env`. Unset, a YouTube URL answers 424.
+
+Two callers are deliberately outside `get_page`, because neither fetches a
+third-party page. OIDC discovery in `api/oidc_auth.py` talks to the identity
+provider with its own user agent and a caller-supplied timeout. The ypl client
+talks to the deployment's own service as a client of its own. `api/smoke_tests.py` also
 imports `httpx2`, but drives the app in-process through `ASGITransport`, so
 nothing leaves it. `tests/life/services/test_outbound_http_is_the_only_http_client.py`
 fails on an HTTP client imported anywhere else in `life/`, naming the file and

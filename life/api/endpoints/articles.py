@@ -37,10 +37,9 @@ from life.services.row_limit import RowLimit
 from life.services.row_limit import apply_row_limit
 from life.services.time_window import apply_time_window
 from life.services.url_extraction import ArticlePage
-from life.services.url_extraction import CaptionsBlocked
 from life.services.url_extraction import PageUnreadable
-from life.services.url_extraction import VideoHasNoCaptions
 from life.services.url_extraction import read_article_page
+from life.services.ypl_client import YplError
 from life.util import clean_url
 
 logger = structlog.get_logger()
@@ -48,15 +47,16 @@ router = APIRouter()
 
 
 # Every way reading a saved URL fails that is not a fault in this app.
-PAGE_ERRORS = (PageFetchError, PageStatusError, PageUnreadable, CaptionsBlocked)
+PAGE_ERRORS = (PageFetchError, PageStatusError, PageUnreadable, YplError)
 
 
-def page_error(e: PageFetchError | PageStatusError | PageUnreadable | CaptionsBlocked) -> HTTPException:
+def page_error(e: PageFetchError | PageStatusError | PageUnreadable | YplError) -> HTTPException:
     """Translate a page that could not be read into a response for a request handler.
 
-    The site failing is a failed dependency. A page that answered but is not the
-    article — a redirect to the homepage, a bot check, no readable text — cannot be
-    processed as the article the caller named.
+    The site failing is a failed dependency, and so is ypl, which reads every
+    YouTube video. A page that answered but is not the article — a redirect to
+    the homepage, a bot check, no readable text — cannot be processed as the
+    article the caller named.
     """
     logger.warning('article_page_unreadable', error=str(e))
     if isinstance(e, PageUnreadable):
@@ -259,21 +259,7 @@ async def insights(body: schemas.ArticleUrl, settings: Settings = Depends(get_se
     logger.debug('article_insights_request', url=body.url)
     url = clean_url(body.url)
     logger.debug('article_insights_processing', url=url)
-    try:
-        page = await run_in_threadpool(read_article_page, url)
-    except (VideoHasNoCaptions, CaptionsBlocked) as e:
-        # A YouTube caption failure is rendered as the answer, because the form
-        # that calls this treats any non-200 as a script error.
-        logger.error('youtube_captions_error', url=url, error=str(e))
-        lines = []
-        for i, line in enumerate(str(e).strip().split('\n')):
-            if i == 0:
-                lines.append(f'<h3>{html_escaping.escape(line)}</h3>')
-            else:
-                lines.append(f'<p>{html_escaping.escape(line)}</p>')
-        return Response(content=''.join(lines).replace('<p></p>', ''))
-    except PAGE_ERRORS as e:
-        raise page_error(e) from e
+    page = await run_in_threadpool(read_page_for_request, url)
 
     assistant = AnthropicAssistant(name='Article Insights', settings=settings, system_prompt=settings.ai.prompts.article_insights)
     mkd = await assistant.generate(page.text, max_tokens=8192)

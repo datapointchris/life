@@ -33,8 +33,9 @@ from life.models.record_change import bind_actor
 from life.services.article_creation import ArticleAlreadyExists
 from life.services.article_creation import save_article_from_url
 from life.services.outbound_http import PageStatusError
-from life.services.url_extraction import CaptionsBlocked
 from life.services.url_extraction import PageUnreadable
+from life.services.ypl_client import YplError
+from life.services.ypl_client import YplUnreachable
 from life.util import clean_url
 
 logger = structlog.get_logger()
@@ -54,12 +55,14 @@ def worth_retrying(error: Exception) -> bool:
     """Whether asking again at once could give a different answer.
 
     A page that is not the article, a duplicate and a 4xx stay the same on a
-    second request. A site refusing because of how many requests it has had gets
-    a second one, which is what keeps the refusal going. A dropped connection or a
-    5xx can pass, so those are retried.
+    second request. ypl answering at all says when to ask again, or that the
+    answer will not change, so its refusal is not retried at once. A dropped
+    connection or a 5xx can pass, so those are retried, ypl's included.
     """
-    if isinstance(error, PageUnreadable | CaptionsBlocked | ArticleAlreadyExists):
+    if isinstance(error, PageUnreadable | ArticleAlreadyExists):
         return False
+    if isinstance(error, YplError):
+        return isinstance(error, YplUnreachable)
     return not (isinstance(error, PageStatusError) and error.status_code < 500)
 
 

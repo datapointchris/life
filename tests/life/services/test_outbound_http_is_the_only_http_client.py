@@ -31,6 +31,7 @@ HTTP_CLIENTS = frozenset(
 ALLOWED = {
     'services/outbound_http.py': 'the door itself',
     'api/oidc_auth.py': 'OIDC discovery talks to the identity provider, not a third-party page',
+    'services/ypl_client.py': 'ypl, the YouTube reader this deployment signs in to as a service, is not a third-party page',
     'api/smoke_tests.py': 'drives the app in-process through ASGITransport, so nothing leaves it',
 }
 

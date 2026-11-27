@@ -49,6 +49,8 @@ The token ships inside the bundle every visitor downloads, so it is no secret. I
 
 `trafilatura` and `pypdf` parse page and PDF bytes already fetched, in `services/url_extraction.py`. Neither makes a request: `trafilatura`'s own download helpers are never called.
 
-## yt-dlp and youtube-transcript-api
+## httpx2
 
-`yt-dlp` fetches YouTube metadata on the app's behalf from `services/url_extraction.py`, alongside `youtube-transcript-api`. Both make outbound requests to a third party with whatever URL a user saved. `yt-dlp` releases weekly to track site changes, so it carries a lower bound only.
+`httpx2` makes the app's requests to its own services, never to a third-party page. `api/oidc_auth.py` reads the identity provider's discovery document. `services/ypl_client.py` reads a saved YouTube video's details and transcript from [ypl](https://github.com/datapointchris/ypl), which paces every read it makes of YouTube, so the app sends YouTube nothing itself.
+
+A ypl read carries the video id from the saved URL, the `traceparent` of the request that asked, and a bearer token for the service client `YPL_CLIENT_ID`. The client takes that token from the identity provider with `YPL_CLIENT_SECRET`, and asks for only `ypl.videos.read` and `ypl.transcripts.read`. ypl answers what YouTube holds for the video: its title, description, channel, duration and captions.

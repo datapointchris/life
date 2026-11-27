@@ -62,6 +62,19 @@ class OIDCSettings:
         self.cli_user_email: str = os.environ.get('OIDC_CLI_USER_EMAIL') or os.environ['USERS_DEFAULT_ADMIN_USER_EMAIL']
 
 
+class YplSettings:
+    """Where ypl answers, and the service client that signs in to it. Every YouTube read goes through ypl.
+
+    `api_url` has no default, because only the deployment knows where its ypl
+    runs. Unset, a YouTube URL is refused rather than read from YouTube.
+    """
+
+    def __init__(self) -> None:
+        self.api_url: str | None = (os.environ.get('YPL_API_URL') or '').rstrip('/') or None
+        self.client_id: str = os.environ.get('YPL_CLIENT_ID') or 'ypl-svc-life'
+        self.client_secret: str | None = os.environ.get('YPL_CLIENT_SECRET') or None
+
+
 class FastAPISettings:
     def __init__(self) -> None:
         self.host: str = os.environ['FASTAPI_HOST']
@@ -165,6 +178,7 @@ class Settings:
         self.redis = RedisSettings()
         self.sqlalchemy = SQLAlchemySettings()
         self.users = UsersSettings()
+        self.ypl = YplSettings()
 
     @property
     def api_url(self) -> str:

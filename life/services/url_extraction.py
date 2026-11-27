@@ -6,28 +6,32 @@ redirected to its homepage or a section index, or a bot challenge standing in
 for the page. `read_article_page` also refuses a page with too little text to
 be about anything. Each refusal is its own exception, so the import worker
 records why and a caller can branch on which.
+
+A YouTube video is read through ypl, never from YouTube. Its text is its
+details and its transcript, each under its own label.
 """
 
 import io
 import re
 from dataclasses import dataclass
+from urllib.parse import parse_qs
 from urllib.parse import unquote
 from urllib.parse import urlsplit
 
 import structlog
 import trafilatura
-import yt_dlp
 from bs4 import BeautifulSoup
 from bs4 import Tag
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
-from youtube_transcript_api import CouldNotRetrieveTranscript
-from youtube_transcript_api import RequestBlocked
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
 
+from life.config import get_settings
 from life.services.outbound_http import FetchedPage
 from life.services.outbound_http import get_page
+from life.services.ypl_client import VideoDetails
+from life.services.ypl_client import YplClient
+from life.services.ypl_client import YplRefused
+from life.services.ypl_client import ypl_client
 
 logger = structlog.get_logger()
 
@@ -52,6 +56,10 @@ BOT_CHALLENGE_TITLES = frozenset(
 
 TITLE_SUFFIX_SEPARATORS = (' | ', ' - ', ' — ', ' · ')
 
+YOUTUBE_HOSTS = frozenset({'youtube.com', 'youtu.be', 'youtube-nocookie.com', 'www.youtube-nocookie.com'})
+VIDEO_PATH_PREFIXES = frozenset({'shorts', 'live', 'embed'})
+VIDEO_ID = re.compile(r'[A-Za-z0-9_-]{11}')
+
 
 class PageUnreadable(Exception):
     """The site answered, but what it sent is not the page that was saved."""
@@ -61,24 +69,19 @@ class PageUnreadable(Exception):
         self.url = url
 
 
-class VideoHasNoCaptions(PageUnreadable):
-    """The video has no transcript to summarize: captions are off, missing, or the video cannot be played."""
-
-    def __init__(self, url: str, reason: str):
-        super().__init__(url, f'{url} has no captions to summarize ({reason})')
-        self.reason = reason
-
-
-class CaptionsBlocked(Exception):
-    """YouTube refused the caption request, which it does to an IP that has made too many.
-
-    Not a property of the video, so nothing about it is permanent, but asking
-    again while the block holds is what extends it.
-    """
+class NotAVideoUrl(PageUnreadable):
+    """A YouTube URL that names no video, such as a channel or a search. Only a video is read, through ypl."""
 
     def __init__(self, url: str):
-        super().__init__(f'YouTube is refusing caption requests from this server, so {url} was not read')
-        self.url = url
+        super().__init__(url, f'{url} names no YouTube video, and only a video can be read')
+
+
+class VideoNotFound(PageUnreadable):
+    """YouTube returns no public or unlisted video for the id: it is private, deleted, or never existed."""
+
+    def __init__(self, url: str, video_id: str):
+        super().__init__(url, f'{url} names video {video_id}, which YouTube does not return')
+        self.video_id = video_id
 
 
 class PageRedirectedAway(PageUnreadable):
@@ -114,11 +117,11 @@ class PageHasNoText(PageUnreadable):
 
 
 @dataclass(frozen=True)
-class YouTubeMetadata:
-    title: str | None
-    description: str | None
-    uploader: str | None
-    duration_seconds: int | None
+class YouTubeVideo:
+    """A video's details, and its transcript where ypl could give one."""
+
+    details: VideoDetails
+    transcript: str | None
 
 
 @dataclass(frozen=True)
@@ -130,55 +133,92 @@ class ArticlePage:
     text: str
 
 
+def url_host(url: str) -> str:
+    """The URL's lowercased host, reading a URL saved without its scheme as if it had one."""
+    return (urlsplit(url if '//' in url else f'//{url}').hostname or '').lower()
+
+
 def is_youtube_url(url: str) -> bool:
-    return 'youtube.com' in url or 'youtu.be' in url
+    host = url_host(url)
+    return host in YOUTUBE_HOSTS or host.endswith('.youtube.com')
 
 
 def extract_video_id(url: str) -> str:
-    """Extract YouTube video ID from any supported URL format.
+    """The video id a YouTube URL names, or `NotAVideoUrl` for one that names none.
 
-    Handles youtube.com/watch?v=ID, youtu.be/ID, youtube.com/shorts/ID,
-    and youtube.com/live/ID. Strips query parameters from the ID.
+    Reads youtu.be/ID, youtube.com/watch?v=ID, and the /shorts/, /live/ and
+    /embed/ paths.
     """
-    if 'youtu.be/' in url:
-        return url.split('youtu.be/')[1].split('?')[0].split('&')[0]
-    if 'youtube.com/shorts/' in url:
-        return url.split('/shorts/')[1].split('?')[0].split('&')[0]
-    if 'youtube.com/live/' in url:
-        return url.split('/live/')[1].split('?')[0].split('&')[0]
-    if 'v=' in url:
-        return url.split('v=')[1].split('&')[0]
-    raise ValueError(f'Cannot extract video ID from URL: {url}')
+    parts = urlsplit(url if '//' in url else f'//{url}')
+    segments = [segment for segment in parts.path.split('/') if segment]
+    if url_host(url) == 'youtu.be':
+        candidate = segments[0] if segments else ''
+    elif len(segments) >= 2 and segments[0] in VIDEO_PATH_PREFIXES:
+        candidate = segments[1]
+    else:
+        candidate = parse_qs(parts.query).get('v', [''])[0]
+    if not VIDEO_ID.fullmatch(candidate):
+        raise NotAVideoUrl(url)
+    return candidate
 
 
-def get_youtube_video_text_captions(url: str) -> str:
+def read_youtube_details(url: str, client: YplClient | None = None) -> VideoDetails:
+    """The video's title, description, channel and duration, read through ypl."""
     video_id = extract_video_id(url)
-    yt_trans = YouTubeTranscriptApi()
-    formatter = TextFormatter()
-    transcript = yt_trans.fetch(video_id)
-    return formatter.format_transcript(transcript)
+    details = (client or ypl_client(get_settings())).video_details(video_id)
+    if details is None:
+        raise VideoNotFound(url, video_id)
+    return details
 
 
-def get_youtube_video_metadata(url: str) -> YouTubeMetadata:
-    """Fetch title/description/uploader/duration via yt-dlp without downloading the video.
+def read_youtube_video(url: str) -> YouTubeVideo:
+    """The video's details and transcript, read through ypl.
 
-    Returns a YouTubeMetadata with all-None fields if the fetch fails — yt-dlp breaks
-    regularly as YouTube changes, so a failure is non-fatal. Callers should fall
-    through to transcript-only extraction on empty metadata.
+    The details are required, because they hold the title. The transcript is
+    not. When ypl refuses it, the video is read without one, and the log names
+    ypl's code and its `Retry-After`. ypl answers 404 for a video with no
+    captions, and 503 while its door is busy or paused.
     """
+    client = ypl_client(get_settings())
+    details = read_youtube_details(url, client)
     try:
-        with yt_dlp.YoutubeDL({'skip_download': True, 'quiet': True, 'no_warnings': True}) as ydl:
-            info = ydl.extract_info(url, download=False) or {}
-    except Exception as e:
-        logger.warning('yt_dlp_metadata_fetch_failed', url=url, error=str(e))
-        return YouTubeMetadata(title=None, description=None, uploader=None, duration_seconds=None)
+        transcript = client.transcript(details.video_id).text
+    except YplRefused as e:
+        logger.warning(
+            'youtube_transcript_left_out',
+            url=url,
+            video_id=details.video_id,
+            status=e.status_code,
+            code=e.code,
+            retry_after=e.retry_after,
+            error=e.message,
+        )
+        transcript = None
+    return YouTubeVideo(details=details, transcript=transcript)
 
-    duration = info.get('duration')
-    return YouTubeMetadata(
-        title=info.get('title'),
-        description=info.get('description'),
-        uploader=info.get('uploader') or info.get('channel'),
-        duration_seconds=int(duration) if isinstance(duration, int | float) else None,
+
+def format_duration(seconds: int | None) -> str:
+    if seconds is None:
+        return ''
+    hours, rest = divmod(seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f'{hours}:{minutes:02}:{seconds:02}' if hours else f'{minutes}:{seconds:02}'
+
+
+def youtube_video_text(video: YouTubeVideo) -> str:
+    """What a model reads for a video: each detail and the transcript under its own label.
+
+    The description is the uploader's own text and often carries what the video
+    leaves unsaid, such as a recipe's quantities. A missing transcript leaves its
+    label empty.
+    """
+    details = video.details
+    return (
+        f'<title>{details.title}</title>\n'
+        f'<channel>{details.channel_title}</channel>\n'
+        f'<duration>{format_duration(details.duration_seconds)}</duration>\n'
+        f'<description>{details.description}</description>\n'
+        f'<transcript>{video.transcript or ""}</transcript>\n'
     )
 
 
@@ -194,7 +234,7 @@ def strip_site_suffix(title: str) -> str:
             if len(tail.split()) <= 4:
                 title = head
             break
-    return title.removesuffix(' - YouTube').strip()
+    return title.strip()
 
 
 def get_page_title(soup: BeautifulSoup) -> str | None:
@@ -285,16 +325,6 @@ def redirected_away(requested_url: str, final_url: str) -> bool:
     return final_path == '' or requested_path.startswith(final_path + '/')
 
 
-def video_captions(url: str) -> str:
-    """A video's captions as text, with the transcript library's failures named for callers."""
-    try:
-        return get_youtube_video_text_captions(url)
-    except RequestBlocked as e:
-        raise CaptionsBlocked(url) from e
-    except CouldNotRetrieveTranscript as e:
-        raise VideoHasNoCaptions(url, type(e).__name__) from e
-
-
 def fetch_article(url: str) -> tuple[FetchedPage, BeautifulSoup | None]:
     """Fetch a saved page, refusing a redirect away from it and a bot check in its place.
 
@@ -312,25 +342,43 @@ def fetch_article(url: str) -> tuple[FetchedPage, BeautifulSoup | None]:
 
 
 def read_article_title(url: str) -> str:
-    """Read a saved page's title, with no captions and no word count."""
+    """Read a saved page's title, with no transcript and no word count."""
+    if is_youtube_url(url):
+        return read_youtube_details(url).title or url
     page, soup = fetch_article(url)
     title = read_pdf(page.content, page.url)[0] if soup is None else get_page_title(soup)
     return title or page.url
 
 
+def read_video_page(url: str) -> ArticlePage:
+    """A video's title, and its details and transcript as the text to summarize.
+
+    The words counted are the description's and the transcript's, so a video
+    read without a transcript is still summarized from a description long
+    enough to be about something.
+    """
+    video = read_youtube_video(url)
+    word_count = len(video.details.description.split()) + len((video.transcript or '').split())
+    if word_count < MIN_READABLE_WORDS:
+        raise PageHasNoText(url, word_count)
+    return ArticlePage(url=url, title=video.details.title or url, text=youtube_video_text(video))
+
+
 def read_article_page(url: str) -> ArticlePage:
     """Fetch a saved page and return its title and the text to summarize.
 
-    A YouTube video's text is its captions and a PDF's is its pages. Everything
-    else is extracted from the page. Every kind is refused when it has too
-    little text.
+    A YouTube video's text is its details and transcript, read through ypl, and
+    a PDF's is its pages. Everything else is extracted from the page. Every kind
+    is refused when it has too little text.
     """
+    if is_youtube_url(url):
+        return read_video_page(url)
     page, soup = fetch_article(url)
     if soup is None:
         title, text = read_pdf(page.content, page.url)
     else:
         title = get_page_title(soup)
-        text = video_captions(url) if is_youtube_url(url) else extract_main_text(page.content, page.url)
+        text = extract_main_text(page.content, page.url)
 
     word_count = len(text.split())
     if word_count < MIN_READABLE_WORDS:

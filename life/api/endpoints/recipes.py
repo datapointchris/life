@@ -22,6 +22,7 @@ from life import models
 from life import schemas
 from life.ai.assistants.anthropic import AnthropicAssistant
 from life.api.endpoints.auth import DbSession
+from life.api.exceptions import FailedDependencyException
 from life.api.exceptions import NotFoundException
 from life.config import Settings
 from life.config import get_settings
@@ -34,6 +35,7 @@ from life.services.outbound_http import PageStatusError
 from life.services.row_limit import RowLimit
 from life.services.row_limit import apply_row_limit
 from life.services.url_extraction import PageUnreadable
+from life.services.ypl_client import YplError
 from life.util import slugify
 
 logger = structlog.get_logger()
@@ -386,6 +388,9 @@ async def import_from_url(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f'Could not fetch URL content: {e}',
         ) from e
+    except YplError as e:
+        logger.error('url_content_fetch_failed', url=url, error=str(e))
+        raise FailedDependencyException(str(e)) from e
 
     candidate = await url_ingest.classify_url_content(url, request.hint, content, settings)
     return schemas.UrlImportResponse(candidate=candidate)

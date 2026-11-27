@@ -24,6 +24,8 @@ from life.services.url_extraction import ArticlePage
 from tests.util import show_status_and_response
 from tests.utils.database import insert_test_data_transactional
 from tests.utils.database import test_settings
+from tests.utils.fake_ypl import FakeVideo
+from tests.utils.fake_ypl import FakeYpl
 
 from .crud_test import ApiCrudTester
 
@@ -119,17 +121,9 @@ def test_search(article_crud_tester):
 
 
 @patch('life.api.endpoints.articles.read_article_page')
-@patch('youtube_transcript_api.YouTubeTranscriptApi')
-@patch('youtube_transcript_api.formatters.TextFormatter')
-def test_summarize(mock_text_formatter, mock_yt_api, mock_get_page, article_crud_tester):
+def test_summarize(mock_get_page, article_crud_tester):
     client, _ = article_crud_tester
-    # Mock the outbound page fetch
     mock_get_page.return_value = PAGE
-
-    # Mock YouTube formatter (not used for non-YouTube URLs)
-    mock_formatter = MagicMock()
-    mock_formatter.format_transcript.return_value = 'Test transcript text'
-    mock_text_formatter.return_value = mock_formatter
 
     mock_assistant = MagicMock()
     expected_summary = 'Test summary'
@@ -146,14 +140,9 @@ def test_summarize(mock_text_formatter, mock_yt_api, mock_get_page, article_crud
 
 
 @patch('life.api.endpoints.articles.read_article_page')
-@patch('youtube_transcript_api.YouTubeTranscriptApi.fetch')
-def test_insights(mock_youtube_transcript_fetch, mock_get_page, article_crud_tester):
+def test_insights(mock_get_page, article_crud_tester):
     client, _ = article_crud_tester
-    # Mock the outbound page fetch
     mock_get_page.return_value = PAGE
-
-    # Mock YouTube transcript
-    mock_youtube_transcript_fetch.return_value = [{'text': 'Test transcript', 'duration': 10}]
 
     mock_assistant = MagicMock()
     mock_assistant.generate = AsyncMock(return_value='## Insights\n\nThis is a test insight.')
@@ -167,8 +156,7 @@ def test_insights(mock_youtube_transcript_fetch, mock_get_page, article_crud_tes
 
 
 @patch('life.api.endpoints.articles.read_article_page')
-@patch('youtube_transcript_api.YouTubeTranscriptApi.fetch')
-def test_insights_refuses_a_truncated_reply(mock_youtube_transcript_fetch, mock_get_page, article_crud_tester):
+def test_insights_refuses_a_truncated_reply(mock_get_page, article_crud_tester):
     """Insights renders the reply without parsing it, so truncation has no other tell.
 
     The prompt says there is no limit to the number or length of insights, and
@@ -176,7 +164,6 @@ def test_insights_refuses_a_truncated_reply(mock_youtube_transcript_fetch, mock_
     """
     client, _ = article_crud_tester
     mock_get_page.return_value = PAGE
-    mock_youtube_transcript_fetch.return_value = [{'text': 'Test transcript', 'duration': 10}]
 
     mock_assistant = MagicMock()
     mock_assistant.generate = AsyncMock(
@@ -191,8 +178,7 @@ def test_insights_refuses_a_truncated_reply(mock_youtube_transcript_fetch, mock_
 
 
 @patch('life.api.endpoints.articles.read_article_page')
-@patch('youtube_transcript_api.YouTubeTranscriptApi.fetch')
-def test_insights_neutralizes_html_in_the_model_output(mock_youtube_transcript_fetch, mock_get_page, article_crud_tester):
+def test_insights_neutralizes_html_in_the_model_output(mock_get_page, article_crud_tester):
     """The model summarizes a page the caller supplied, so its output is attacker-influenced.
 
     Both consumers render this response as HTML, so a <script> reaching the
@@ -200,7 +186,6 @@ def test_insights_neutralizes_html_in_the_model_output(mock_youtube_transcript_f
     """
     client, _ = article_crud_tester
     mock_get_page.return_value = PAGE
-    mock_youtube_transcript_fetch.return_value = [{'text': 'Test transcript', 'duration': 10}]
 
     mock_assistant = MagicMock()
     mock_assistant.generate = AsyncMock(return_value='## Insights\n\n<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>')
@@ -570,6 +555,76 @@ class TestCreateFromUrl:
             response = client.post(f'{ENDPOINT}/create-from-url', json={'url': 'https://example.com/dead'})
         assert response.status_code == status.HTTP_424_FAILED_DEPENDENCY, show_status_and_response(response)
         assert response.json()['message'] == str(failure)
+
+
+# ---------------------------------------------------------------------------
+# A YouTube URL, read through a fake ypl
+# ---------------------------------------------------------------------------
+
+VIDEO = FakeVideo(
+    video_id='Wr1tt3nVid0',
+    title='Knife skills for a weeknight',
+    description=' '.join(['How to hold a chef knife, curl the guiding hand and keep the tip on the board while dicing an onion.'] * 3),
+    channel_title='A Made-Up Cooking Channel',
+    duration_seconds=754,
+    transcript='so today we are going to talk about the pinch grip and why it keeps your fingers safe',
+)
+VIDEO_URL = f'https://www.youtube.com/watch?v={VIDEO.video_id}'
+
+
+@pytest.fixture
+def fake_ypl(monkeypatch):
+    """A fake ypl behind the reads, and a page fetch that fails the test if a YouTube URL reaches it."""
+    fake = FakeYpl()
+    fake.add(VIDEO)
+    client = fake.client()
+    monkeypatch.setattr('life.services.url_extraction.ypl_client', lambda settings: client)
+    monkeypatch.setattr('life.services.url_extraction.get_page', MagicMock(side_effect=AssertionError('a YouTube URL reached get_page')))
+    return fake
+
+
+def summarize_and_save(client, url: str) -> tuple[str, dict]:
+    """Summarize `url` and save what came back, as the web app's add form does. Answers what the model read and the saved article."""
+    assistant = MagicMock()
+    assistant.generate_structured = AsyncMock(return_value=schemas.ArticleSummaryAndTags(summary='How to hold a knife.', tags=['cooking']))
+    with patched_assistant(assistant):
+        summary = client.post(f'{ENDPOINT}/summarize', json={'url': url})
+    assert summary.status_code == status.HTTP_201_CREATED, show_status_and_response(summary)
+    article = summary.json() | {'url': url, 'save_date': dt.datetime.now(dt.UTC).isoformat()}
+    saved = client.post(ENDPOINT, json=article)
+    assert saved.status_code == status.HTTP_201_CREATED, show_status_and_response(saved)
+    return assistant.generate_structured.call_args.args[0], saved.json()
+
+
+def test_a_youtube_url_is_saved_with_its_title_channel_duration_and_transcript_read_through_ypl(txn_api_logged_in, fake_ypl):
+    client, _ = txn_api_logged_in
+    model_read, saved = summarize_and_save(client, VIDEO_URL)
+
+    assert saved['title'] == VIDEO.title
+    assert f'<channel>{VIDEO.channel_title}</channel>' in model_read
+    assert '<duration>12:34</duration>' in model_read
+    assert f'<transcript>{VIDEO.transcript}</transcript>' in model_read
+
+
+def test_a_youtube_url_saved_by_its_url_alone_reads_only_the_details(txn_api_logged_in, fake_ypl):
+    client, _ = txn_api_logged_in
+    response = client.post(f'{ENDPOINT}/create-from-url', json={'url': VIDEO_URL})
+
+    assert response.status_code == status.HTTP_201_CREATED, show_status_and_response(response)
+    assert response.json()['title'] == VIDEO.title
+    assert [read.url.path for read in fake_ypl.reads] == ['/api/v1/youtube/videos']
+
+
+def test_a_busy_door_saves_the_video_without_its_transcript_and_logs_the_retry_after(txn_api_logged_in, fake_ypl, caplog):
+    client, _ = txn_api_logged_in
+    fake_ypl.transcript_refusal = (503, 'youtube_reads_busy', 60)
+
+    model_read, saved = summarize_and_save(client, VIDEO_URL)
+
+    assert saved['title'] == VIDEO.title
+    assert '<transcript></transcript>' in model_read
+    (left_out,) = [r.msg for r in caplog.records if isinstance(r.msg, dict) and r.msg.get('event') == 'youtube_transcript_left_out']
+    assert (left_out['code'], left_out['retry_after']) == ('youtube_reads_busy', 60)
 
 
 def summarize_refused_by(limit: AssistantUsageLimitReached, client):

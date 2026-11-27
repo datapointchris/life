@@ -1,13 +1,14 @@
-from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
 
 from life.services.outbound_http import FetchedPage
-from life.services.url_extraction import YouTubeMetadata
+from life.services.url_extraction import NotAVideoUrl
 from life.services.url_extraction import extract_video_id
-from life.services.url_extraction import get_youtube_video_metadata
+from life.services.url_extraction import is_youtube_url
 from life.services.url_extraction import read_article_title
+
+VIDEO_ID = 'Wr1tt3nVid0'
 
 
 def test_a_page_too_short_to_summarize_still_gives_the_title_it_is_saved_under():
@@ -19,75 +20,28 @@ def test_a_page_too_short_to_summarize_still_gives_the_title_it_is_saved_under()
 
 
 @pytest.mark.parametrize(
-    ('url', 'expected'),
+    'url',
     [
-        ('https://www.youtube.com/watch?v=qEb96qFi2Tc', 'qEb96qFi2Tc'),
-        ('https://youtu.be/qEb96qFi2Tc', 'qEb96qFi2Tc'),
-        ('https://www.youtube.com/shorts/qEb96qFi2Tc', 'qEb96qFi2Tc'),
-        ('https://www.youtube.com/live/qEb96qFi2Tc', 'qEb96qFi2Tc'),
-        ('https://www.youtube.com/watch?v=qEb96qFi2Tc&t=30s', 'qEb96qFi2Tc'),
-        ('https://youtu.be/qEb96qFi2Tc?si=abc123', 'qEb96qFi2Tc'),
+        f'https://www.youtube.com/watch?v={VIDEO_ID}',
+        f'https://youtu.be/{VIDEO_ID}',
+        f'https://www.youtube.com/shorts/{VIDEO_ID}',
+        f'https://www.youtube.com/live/{VIDEO_ID}',
+        f'https://www.youtube.com/embed/{VIDEO_ID}',
+        f'https://m.youtube.com/watch?v={VIDEO_ID}&t=30s',
+        f'https://youtu.be/{VIDEO_ID}?si=abc123',
+        f'youtube.com/watch?v={VIDEO_ID}',
     ],
 )
-def test_extract_video_id_handles_supported_url_formats(url: str, expected: str):
-    assert extract_video_id(url) == expected
+def test_extract_video_id_handles_supported_url_formats(url: str):
+    assert is_youtube_url(url)
+    assert extract_video_id(url) == VIDEO_ID
 
 
-def test_extract_video_id_raises_on_unsupported_url():
-    with pytest.raises(ValueError, match='Cannot extract video ID'):
-        extract_video_id('https://example.com/not-a-youtube-url')
+@pytest.mark.parametrize('url', ['https://www.youtube.com/@somechannel', 'https://www.youtube.com/watch?v=../status'])
+def test_a_youtube_url_naming_no_video_is_refused_before_any_read(url: str):
+    with pytest.raises(NotAVideoUrl):
+        extract_video_id(url)
 
 
-def test_get_youtube_video_metadata_returns_structured_info_on_success():
-    fake_info = {
-        'title': 'Why everyone needs Chimichurri in their lives',
-        'description': 'A 3:1 vinaigrette framework applied to herbs...',
-        'uploader': 'KWOOWK',
-        'duration': 612,
-    }
-    with patch('life.services.url_extraction.yt_dlp.YoutubeDL') as mock_ydl_cls:
-        mock_ydl = MagicMock()
-        mock_ydl.extract_info.return_value = fake_info
-        mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
-
-        result = get_youtube_video_metadata('https://www.youtube.com/watch?v=qEb96qFi2Tc')
-
-    assert result == YouTubeMetadata(
-        title='Why everyone needs Chimichurri in their lives',
-        description='A 3:1 vinaigrette framework applied to herbs...',
-        uploader='KWOOWK',
-        duration_seconds=612,
-    )
-
-
-def test_get_youtube_video_metadata_falls_back_to_channel_when_uploader_missing():
-    fake_info = {'title': 't', 'description': 'd', 'channel': 'Some Channel', 'duration': 100}
-    with patch('life.services.url_extraction.yt_dlp.YoutubeDL') as mock_ydl_cls:
-        mock_ydl = MagicMock()
-        mock_ydl.extract_info.return_value = fake_info
-        mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
-
-        result = get_youtube_video_metadata('https://www.youtube.com/watch?v=x')
-
-    assert result.uploader == 'Some Channel'
-
-
-def test_get_youtube_video_metadata_returns_empty_on_yt_dlp_exception():
-    """yt-dlp breaks often — a failure must not propagate. Callers fall back to transcript-only."""
-    with patch('life.services.url_extraction.yt_dlp.YoutubeDL') as mock_ydl_cls:
-        mock_ydl_cls.return_value.__enter__.side_effect = RuntimeError('yt-dlp site change broke extraction')
-
-        result = get_youtube_video_metadata('https://www.youtube.com/watch?v=x')
-
-    assert result == YouTubeMetadata(title=None, description=None, uploader=None, duration_seconds=None)
-
-
-def test_get_youtube_video_metadata_returns_empty_on_none_info():
-    with patch('life.services.url_extraction.yt_dlp.YoutubeDL') as mock_ydl_cls:
-        mock_ydl = MagicMock()
-        mock_ydl.extract_info.return_value = None
-        mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
-
-        result = get_youtube_video_metadata('https://www.youtube.com/watch?v=x')
-
-    assert result == YouTubeMetadata(title=None, description=None, uploader=None, duration_seconds=None)
+def test_a_url_that_only_mentions_youtube_is_read_as_a_page():
+    assert not is_youtube_url('https://example.com/post?ref=youtube.com')

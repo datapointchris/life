@@ -11,7 +11,7 @@ from life.ai.assistants.anthropic import AssistantFailure
 from life.ai.assistants.anthropic import AssistantOutputError
 from life.services.url_ingest import classify_url_content
 
-URL = 'https://www.youtube.com/watch?v=qEb96qFi2Tc'
+URL = 'https://www.youtube.com/watch?v=Wr1tt3nVid0'
 
 
 def patched_assistant(generate_structured: AsyncMock):

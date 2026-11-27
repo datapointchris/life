@@ -10,10 +10,10 @@ import structlog
 from life import schemas
 from life.ai.assistants.anthropic import AnthropicAssistant
 from life.config import Settings
-from life.services.url_extraction import get_youtube_video_metadata
-from life.services.url_extraction import get_youtube_video_text_captions
 from life.services.url_extraction import is_youtube_url
 from life.services.url_extraction import read_article_page
+from life.services.url_extraction import read_youtube_video
+from life.services.url_extraction import youtube_video_text
 
 logger = structlog.get_logger()
 
@@ -21,26 +21,17 @@ logger = structlog.get_logger()
 def extract_content_for_classifier(url: str) -> str:
     """Build the labeled content block the classifier reads.
 
-    YouTube: description + transcript, each in its own labeled section so Claude
-    can weigh the canonical written recipe (description) against the spoken
-    context (transcript). If either fetch fails, the other section is still used.
+    YouTube: the details and the transcript, read through ypl, each in its own
+    labeled section, so Claude can weigh the written recipe in the description
+    against the spoken one. A transcript ypl refuses leaves its section empty.
+    Unlike a summary, no word count applies, since a description alone can hold
+    the recipe.
 
     Articles: the page text `read_article_page` returns, which refuses a redirect
     away from the page, a bot check and a page with no readable text.
     """
     if is_youtube_url(url):
-        metadata = get_youtube_video_metadata(url)
-        try:
-            transcript = get_youtube_video_text_captions(url)
-        except Exception as e:
-            logger.warning('youtube_transcript_fetch_failed', url=url, error=str(e))
-            transcript = ''
-        return (
-            f'<title>{metadata.title or ""}</title>\n'
-            f'<uploader>{metadata.uploader or ""}</uploader>\n'
-            f'<description>{metadata.description or ""}</description>\n'
-            f'<transcript>{transcript}</transcript>\n'
-        )
+        return youtube_video_text(read_youtube_video(url))
 
     return read_article_page(url).text
 

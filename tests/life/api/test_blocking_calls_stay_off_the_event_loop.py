@@ -21,8 +21,8 @@ PACKAGE = Path(life.__file__).parent
 AWAITING_NODES = (ast.Await, ast.AsyncFor, ast.AsyncWith)
 
 # get_page is the one sanctioned page fetch, and these are the calls that leave
-# the process without it: the two YouTube clients and the OIDC key lookups.
-OUTBOUND_CALLS = {'get_page', 'YoutubeDL', 'YouTubeTranscriptApi', 'discover_jwks_uri', 'get_signing_key_from_jwt'}
+# the process without it: the read through ypl and the OIDC key lookups.
+OUTBOUND_CALLS = {'get_page', 'request_ypl', 'discover_jwks_uri', 'get_signing_key_from_jwt'}
 
 Function = ast.FunctionDef | ast.AsyncFunctionDef
 
@@ -90,7 +90,7 @@ def test_no_async_function_makes_an_outbound_call_on_the_event_loop():
     assistant passes the test above."""
     functions = package_functions()
     callers = outbound_callers(functions)
-    fetchers = {'read_article_page', 'get_youtube_video_metadata', 'get_youtube_video_text_captions'}
+    fetchers = {'read_article_page', 'read_youtube_details', 'read_youtube_video'}
     assert fetchers <= callers, 'a fetcher fell out of the walk, so one of OUTBOUND_CALLS was renamed'
 
     blocking = sorted(
