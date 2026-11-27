@@ -65,13 +65,18 @@
 
   &__row {
     display: grid;
-    grid-template-columns: 1fr 5rem auto;
+    // The middle column holds three digits and the native spin arrows at --fs-400.
+    grid-template-columns: 1fr 6.5rem auto;
     gap: var(--space-xs);
     margin-bottom: var(--space-3xs);
     align-items: center;
   }
 
+  // The shared .textbox padding (1.75em a side) and margin would leave no room for the
+  // digit beside the spin arrows, so the count's input keeps a narrow inset of its own.
   &__target {
+    margin: 0;
+    padding-inline: var(--space-3xs);
     text-align: right;
   }
 
